@@ -1,0 +1,10 @@
+.streamlit/secrets.toml
+gravity_korean.db
+gravity_korean.db.backup-*
+__pycache__/
+*.pyc
+.venv/
+.venv-runtime/
+.uv-cache/
+*.out.log
+*.err.log
