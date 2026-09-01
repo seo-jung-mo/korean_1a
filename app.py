@@ -14,15 +14,30 @@ from PIL import Image, ImageOps
 
 
 @st.cache_data(show_spinner=False)
-def fit_image_to_canvas(image_path, canvas_size=(180, 140), image_size=None):
-    """Center an image on a fixed transparent canvas without distorting it."""
+def fit_image_to_canvas(image_path, canvas_size=(180, 140), image_size=None, vertical_alignment="center"):
+    """Fit an image on a transparent canvas without distortion."""
     image_size = image_size or canvas_size
     with Image.open(image_path) as source:
         fitted = ImageOps.contain(source.convert("RGBA"), image_size, Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", canvas_size, (255, 255, 255, 0))
-    offset = ((canvas_size[0] - fitted.width) // 2, (canvas_size[1] - fitted.height) // 2)
+    offset_y = canvas_size[1] - fitted.height if vertical_alignment == "bottom" else (canvas_size[1] - fitted.height) // 2
+    offset = ((canvas_size[0] - fitted.width) // 2, offset_y)
     canvas.paste(fitted, offset, fitted)
     return canvas
+
+
+def render_unit1_study_image(image_name, canvas_size=(180, 180), image_size=(165, 170)):
+    """Render Unit 1 learning illustrations on one bottom-aligned visual canvas."""
+    image_path = Path(__file__).with_name("assets") / "people" / image_name
+    st.image(
+        fit_image_to_canvas(
+            image_path,
+            canvas_size=canvas_size,
+            image_size=image_size,
+            vertical_alignment="bottom",
+        ),
+        width=canvas_size[0],
+    )
 
 
 def clear_session_state_key(key):
@@ -87,6 +102,21 @@ TEXTBOOK_TITLE = "세종한국어 1A"
 TEXTBOOK_EDITION = "2022년 개정판"
 TEXTBOOK_SOURCE = "누리 세종학당 · 세종학당재단"
 
+# 전체 단원을 빠르게 검수할 때는 기본값 1을 사용합니다. 최종 운영에서는
+# KOREAN_APP_REVIEW_MODE=0으로 실행하면 순차 잠금이 적용됩니다.
+REVIEW_MODE = os.getenv("KOREAN_APP_REVIEW_MODE", "1") == "1"
+ACTIVE_REFERENCE_IMAGE = None
+
+
+def get_unit_completion_steps(unit_number):
+    """Return valid sequential completion states without treating free access as completion."""
+    vocab_done = bool(st.session_state.get(f"vocab_done_{unit_number}", False))
+    grammar1_done = vocab_done and bool(st.session_state.get(f"grammar1_done_{unit_number}", False))
+    grammar2_done = grammar1_done and bool(st.session_state.get(f"grammar2_done_{unit_number}", False))
+    activity1_done = grammar2_done and bool(st.session_state.get(f"activity1_completed_{unit_number}", False))
+    unit_done = activity1_done and bool(st.session_state.get(f"unit_completed_{unit_number}", False))
+    return vocab_done, grammar1_done, grammar2_done, activity1_done, unit_done
+
 TEXTBOOK_UNITS = [
     {"number": 0, "title": "입문 · 한글을 배워요", "goal": "한글 자모와 기본 음절을 읽고 쓸 수 있어요.", "grammar": "한글 자모 · 음절 읽기", "functions": "인사와 교실 표현 익히기"},
     {"number": 1, "title": "안녕하세요? 저는 안나예요", "goal": "이름과 국적, 직업을 소개할 수 있어요.", "grammar": "이에요/예요 · 은/는", "functions": "인사하기 · 자기소개하기"},
@@ -96,7 +126,7 @@ TEXTBOOK_UNITS = [
     {"number": 5, "title": "빵하고 우유를 사요", "goal": "가는 장소와 사는 물건을 말할 수 있어요.", "grammar": "에 가다 · 하고", "functions": "장소 말하기 · 물건 사기"},
     {"number": 6, "title": "사과 다섯 개 주세요", "goal": "수량과 단위 명사를 사용해 주문하고 공손하게 요청할 수 있어요.", "grammar": "단위 명사 · -(으)세요", "functions": "수량 묻고 답하기 · 주문하고 요청하기"},
     {"number": 7, "title": "일곱 시에 시작해요", "goal": "날짜와 시간, 일정을 말할 수 있어요.", "grammar": "에 · 몇 시예요?", "functions": "날짜·시간 묻고 답하기 · 일정 말하기"},
-    {"number": 8, "title": "날씨가 더워요?", "goal": "날씨와 상태를 간단히 설명할 수 있어요.", "grammar": "-아요/어요 · 형용사", "functions": "날씨 묻고 답하기 · 상태 설명하기"},
+    {"number": 8, "title": "날씨가 더워요?", "goal": "날씨와 상태를 긍정·부정으로 설명할 수 있어요.", "grammar": "안 · ㅂ 불규칙", "functions": "날씨 묻고 답하기 · 상태 설명하기"},
     {"number": 9, "title": "공원에서 산책했어요", "goal": "장소에서 한 과거의 일을 말할 수 있어요.", "grammar": "에서 · -았어요/-었어요", "functions": "과거 활동 말하기"},
     {"number": 10, "title": "우리 같이 놀이공원에 갈까요?", "goal": "함께 할 일을 제안하고 약속할 수 있어요.", "grammar": "-(으)ㄹ까요? · -(으)러 가다", "functions": "제안하기 · 약속 정하기"},
 ]
@@ -459,7 +489,7 @@ LESSON_SECTION_CONTENT = {
     5: {"grammar1": "에 가다", "grammar2": "하고", "example": "마트에 가요. 빵하고 우유를 사요.", "activity1": "마트에서 사는 물건 말하기", "activity2": "백화점에서 사는 물건 쓰기"},
     6: {"grammar1": "단위 명사", "grammar2": "-(으)세요", "example": "사과 다섯 개 주세요.", "activity1": "과일 가게에서 수량과 가격 확인하기", "activity2": "편의점에서 살 물건과 수량 쓰기"},
     7: {"grammar1": "에", "grammar2": "몇 시예요?", "example": "수업은 일곱 시에 시작해요.", "activity1": "날짜와 요일 확인하기", "activity2": "나의 하루 시간표 말하기"},
-    8: {"grammar1": "-아요/어요", "grammar2": "날씨 형용사", "example": "오늘 날씨가 더워요.", "activity1": "도시와 날씨를 선택해 대화 완성하기", "activity2": "고향의 계절과 날씨 문장 완성하기"},
+    8: {"grammar1": "안", "grammar2": "ㅂ 불규칙", "example": "오늘은 안 더워요. 겨울은 추워요.", "activity1": "도시와 날씨를 선택해 대화 완성하기", "activity2": "고향의 계절과 날씨 문장 완성하기"},
     9: {"grammar1": "에서", "grammar2": "-았어요/-었어요", "example": "공원에서 산책했어요.", "activity1": "장소와 과거 활동 연결하기", "activity2": "어제 한 일을 세 문장으로 회상하기"},
     10: {"grammar1": "-(으)ㄹ까요?", "grammar2": "-(으)러 가다", "example": "우리 같이 갈까요?", "activity1": "주말 계획 카드로 제안 만들기", "activity2": "장소와 시간을 선택해 약속 대화 완성하기"},
 }
@@ -475,14 +505,204 @@ GRAMMAR_RULES = {
     "-아요/어요": "동사를 해요체로 말할 때 사용해요. 어간의 마지막 모음이 ‘아’ 또는 ‘오’ 계열이면 ‘-아요’, 그 밖에는 ‘-어요’를 붙이고, ‘하다’는 ‘해요’가 돼요.",
     "에 가다": "이동하는 목적지 뒤에 ‘에’를 붙여 ‘어디에 가요?’라고 묻고 ‘장소에 가요’라고 대답해요.",
     "에": "시간이나 날짜 뒤에 ‘에’를 붙여 언제 하는 일인지 말해요. 예: 수요일에 수업이 있어요.",
+    "몇 시예요?": "현재 시각이나 일정 시간을 물을 때 사용해요. ‘몇 시예요?’라고 묻고 ‘일곱 시예요’처럼 대답해요.",
     "하고": "두 개 이상의 명사나 사람을 나란히 연결할 때 사용해요. 예: 빵하고 우유를 사요.",
     "단위 명사": "사람이나 물건의 수를 셀 때 알맞은 단위 명사를 사용해요. 물건은 ‘개’, 사람은 ‘명’, 동물은 ‘마리’, 음료는 ‘잔·병’, 책은 ‘권’을 사용해요.",
+    "안": "동사나 형용사 앞에 ‘안’을 놓아 하지 않거나 그렇지 않다는 뜻을 나타내요. 예: 오늘은 안 더워요.",
+    "ㅂ 불규칙": "일부 형용사의 어간 끝 ‘ㅂ’은 모음으로 시작하는 어미 앞에서 ‘우’로 바뀌어요. 예: 춥다 → 추워요, 덥다 → 더워요.",
     "에서": "행동이 일어난 장소 뒤에 붙여요. ‘공원에서 산책했어요’처럼 장소와 행동을 연결해요.",
     "-았어요/-었어요": "이미 끝난 일을 말할 때 사용하는 과거 표현이에요. ‘산책해요’는 ‘산책했어요’, ‘봐요’는 ‘봤어요’가 돼요.",
     "-(으)ㄹ까요?": "상대방에게 함께할 일을 제안하거나 의견을 물을 때 사용해요. 받침이 없으면 ‘-ㄹ까요?’, 받침이 있으면 ‘-을까요?’를 붙여요.",
     "-(으)러 가다": "어떤 행동을 하려는 목적을 말할 때 사용해요. 받침이 없거나 ㄹ 받침이면 ‘-러’, 그 밖의 받침이 있으면 ‘-으러’를 붙이고 ‘가요/와요’와 함께 써요.",
     "-(으)세요": "상대방에게 공손하게 어떤 행동을 요청하거나 명령할 때 사용해요. 동사 어간에 받침이 있으면 ‘-으세요’, 받침이 없으면 ‘-세요’를 붙여요.",
 }
+
+UNIT_GOALS_EN = {
+    1: "Greet someone and introduce your name, nationality, and occupation.",
+    2: "Ask for and give names, phone numbers, and contact information.",
+    3: "Ask and answer where people and objects are.",
+    4: "Talk about everyday actions and what you do today.",
+    5: "Talk about places you go and things you like or buy.",
+    6: "Count people and objects and make polite requests.",
+    7: "Ask and answer about days and times.",
+    8: "Describe weather and conditions.",
+    9: "Talk about places and activities in the past.",
+    10: "Make suggestions and arrange plans together.",
+}
+
+GRAMMAR_RULES_EN = {
+    "이에요/예요": "Use 이에요 after a noun ending in a consonant and 예요 after a noun ending in a vowel.",
+    "은/는": "Use 은/는 after a noun to introduce or contrast the topic.",
+    "이/가": "Use 이/가 to mark the subject, especially when asking about or presenting new information.",
+    "이/가 아니에요": "Use 이/가 아니에요 to say that someone or something is not the stated noun.",
+    "이/그/저": "Use 이 near the speaker, 그 near the listener, and 저 for something far from both.",
+    "에 있다/없다": "Use 에 with 있어요/없어요 to say where a person or object is or is not.",
+    "을/를": "Use 을/를 after the object of an action.",
+    "-아요/어요": "Use -아요/어요 to make a polite present-tense form.",
+    "에 가다": "Use 에 after a destination with 가요.",
+    "에": "Use 에 after a day, date, or time to say when something happens.",
+    "몇 시예요?": "Use 몇 시예요? to ask the time.",
+    "하고": "Use 하고 between nouns to mean ‘and’.",
+    "단위 명사": "Use the appropriate counter when counting people, objects, animals, drinks, or books.",
+    "안": "Place 안 before a verb or adjective to make a negative statement.",
+    "ㅂ 불규칙": "Some stems ending in ㅂ change ㅂ to 우/오 before a vowel.",
+    "에서": "Use 에서 after the place where an action happens.",
+    "-았어요/-었어요": "Use -았어요/-었어요 to talk about a completed past action.",
+    "-(으)ㄹ까요?": "Use -(으)ㄹ까요? to suggest doing something together or ask for an opinion.",
+    "-(으)러 가다": "Use -(으)러 가요 to express the purpose of going somewhere.",
+    "-(으)세요": "Use -(으)세요 to make a polite request or instruction.",
+}
+
+GRAMMAR_HIGHLIGHT_PATTERNS = {
+    1: (r"이에요|예요", r"(?<=[가-힣A-Za-z])(?:은|는)(?=\s|[.,?!]|$)"),
+    2: (r"(?<=[가-힣A-Za-z0-9])(?:이|가)(?=\s|[.,?!]|$)", r"(?:이|가) 아니에요|아니에요"),
+    3: (r"(?<![가-힣])(?:이|그|저)(?=\s)", r"에 (?:있어요|없어요)|있어요|없어요"),
+    4: (r"(?:아|어|해)요", r"(?<=[가-힣A-Za-z])(?:을|를)(?=\s|[.,?!]|$)"),
+    5: (r"에 가요", r"하고"),
+    6: (r"(?<=[가-힣0-9\s])(?:개|명|마리|잔|병|권)(?=\s|[.,?!]|$)", r"(?:으세요|세요|주세요)"),
+    7: (r"(?<=[가-힣0-9])에(?=\s|[.,?!]|$)", r"몇 시|시예요"),
+    8: (r"(?<![가-힣])안(?=\s)", r"(?:추워요|더워요|어려워요|매워요|무거워요|가벼워요)"),
+    9: (r"에서", r"(?:았어요|었어요|했어요|봤어요)"),
+    10: (r"(?:을까요|ㄹ까요)", r"(?:으러|러) 가요"),
+}
+
+
+UNIT2_NON_PARTICLE_WORD_ENDINGS = ("같이", "없이", "사이", "하와이", "웨이")
+UNIT2_META_SUBJECTS = {
+    "받침이",
+    "모음이",
+    "문법이",
+    "조사가",
+    "표현이",
+    "설명이",
+    "정답이",
+    "선택이",
+    "학습이",
+}
+
+
+def is_grammar_highlight_candidate(source, unit_number, match):
+    """Reject syllables that resemble grammar forms but are part of ordinary words."""
+    if unit_number != 2 or match.lastgroup != "grammar1":
+        return True
+
+    word_match = re.search(r"[가-힣]+$", source[:match.end()])
+    if not word_match:
+        return True
+    word = word_match.group(0)
+    if word in UNIT2_META_SUBJECTS:
+        return False
+    if word.endswith(UNIT2_NON_PARTICLE_WORD_ENDINGS):
+        return False
+    if word in {"십이", "십이십이"}:
+        return False
+    return True
+
+
+def highlight_learning_text(text, unit_number, escape=True):
+    """Highlight only the target grammar forms, never the whole sentence."""
+    source = html.escape(str(text)) if escape else str(text)
+    grammar1_pattern, grammar2_pattern = GRAMMAR_HIGHLIGHT_PATTERNS.get(unit_number, (r"(?!x)x", r"(?!x)x"))
+    combined = re.compile(f"(?P<grammar2>{grammar2_pattern})|(?P<grammar1>{grammar1_pattern})")
+
+    def replace(match):
+        if not is_grammar_highlight_candidate(source, unit_number, match):
+            return match.group(0)
+        css_class = "grammar-two" if match.lastgroup == "grammar2" else "grammar-one"
+        return f'<span class="{css_class}">{match.group(0)}</span>'
+
+    return combined.sub(replace, source)
+
+
+def highlight_learning_markdown(text, unit_number):
+    """Apply the same grammar colors using Streamlit's Markdown color syntax."""
+    source = str(text)
+    protected_colors = []
+
+    def protect_color(match):
+        protected_colors.append(match.group(0))
+        return f"@@EXISTING_COLOR_{len(protected_colors) - 1}@@"
+
+    # Preserve dialogue-speaker colors and any intentional emphasis already present.
+    source = re.sub(r":[a-z]+\[[^\]]*\]", protect_color, source)
+    grammar1_pattern, grammar2_pattern = GRAMMAR_HIGHLIGHT_PATTERNS.get(unit_number, (r"(?!x)x", r"(?!x)x"))
+    combined = re.compile(f"(?P<grammar2>{grammar2_pattern})|(?P<grammar1>{grammar1_pattern})")
+
+    def replace(match):
+        if not is_grammar_highlight_candidate(source, unit_number, match):
+            return match.group(0)
+        color = "blue" if match.lastgroup == "grammar2" else "orange"
+        return f":{color}[**{match.group(0)}**]"
+
+    source = combined.sub(replace, source)
+    for index, colored_text in enumerate(protected_colors):
+        source = source.replace(f"@@EXISTING_COLOR_{index}@@", colored_text)
+    return source
+
+
+def _current_learning_unit():
+    return st.session_state.get("selected_unit_number", 1)
+
+
+def english_support_enabled():
+    return st.session_state.get("app_language", "한국어") == "English"
+
+
+def add_english_support(body, message_type="info"):
+    """Replace interface guidance with English while preserving Korean practice output."""
+    text = str(body)
+    if not english_support_enabled():
+        return text
+
+    for grammar, korean_rule in GRAMMAR_RULES.items():
+        if text.strip() == korean_rule:
+            return GRAMMAR_RULES_EN[grammar]
+
+    if message_type == "success":
+        if "정답" in text or "맞아요" in text:
+            return "Correct. Well done!"
+        if "완료" in text or "완성" in text or "제출" in text:
+            return "Completed. Keep going!"
+        return text
+    elif message_type in {"warning", "error"}:
+        if "정답" in text or "오답" in text or "아니에요" in text:
+            return "Check the explanation and try again."
+        return "Please review the required information and try again."
+    elif "소리 내어" in text or "읽" in text:
+        return "Read the Korean sentence aloud and focus on the highlighted form."
+    elif "그림" in text:
+        return "Look at the picture and use the Korean information to answer."
+    elif "선택" in text or "고르" in text:
+        return "Choose the answer that best completes the Korean sentence."
+    elif "입력" in text or "작성" in text:
+        return "Enter the requested information in Korean."
+    elif "완료" in text:
+        return "Complete the required learning steps to continue."
+    return text
+
+
+def render_learning_info(body, icon=None, **kwargs):
+    supported = add_english_support(body, "info")
+    st.info(highlight_learning_markdown(supported, _current_learning_unit()), icon=icon, **kwargs)
+
+
+def render_learning_success(body, icon=None, **kwargs):
+    supported = add_english_support(body, "success")
+    st.success(highlight_learning_markdown(supported, _current_learning_unit()), icon=icon, **kwargs)
+
+
+def render_learning_warning(body, icon=None, **kwargs):
+    supported = add_english_support(body, "warning")
+    st.warning(highlight_learning_markdown(supported, _current_learning_unit()), icon=icon, **kwargs)
+
+
+def render_learning_error(body, icon=None, **kwargs):
+    supported = add_english_support(body, "error")
+    st.error(highlight_learning_markdown(supported, _current_learning_unit()), icon=icon, **kwargs)
+
+
+def render_learning_markdown(body, **kwargs):
+    st.markdown(highlight_learning_markdown(body, _current_learning_unit()), **kwargs)
 
 
 st.set_page_config(
@@ -778,7 +998,7 @@ def pronunciation_mission():
     with left:
         st.markdown('<div class="card"><div class="eyebrow">Mission 01 · batchim</div><h2>따라 말해 보세요</h2><div style="font-size:32px;font-weight:800;margin:25px 0">한국어</div><p class="sub">천천히 녹음해도 괜찮아요. ㄴ 받침과 모음 연결에 집중해 보세요.</p></div>', unsafe_allow_html=True)
         audio = st.file_uploader("음성 파일 업로드", type=["wav", "mp3", "m4a"], key="pronunciation_audio")
-        run_demo = st.button("샘플 발음 분석 실행", type="primary", use_container_width=True)
+        run_demo = st.button("샘플 발음 분석 실행", type="primary", width="stretch")
         if audio or run_demo:
             st.audio(audio if audio else None, format="audio/wav") if audio else None
             st.markdown('<div class="card"><div class="eyebrow">AI pronunciation preview</div><h2>정확도 <span class="lime">88%</span></h2><div class="progress"><div style="width:88%"></div></div><p class="sub">“한”의 받침은 좋아요. “국어”로 넘어갈 때 소리를 조금 더 부드럽게 이어 보세요.</p><span class="pill active">ㄴ 받침</span><span class="pill">연음</span></div>', unsafe_allow_html=True)
@@ -822,7 +1042,7 @@ def sentence_builder():
         st.session_state.builder_finished = False
     st.session_state.setdefault("builder_finished", False)
     words, answer = missions[(st.session_state.builder_offset + st.session_state.builder_index) % len(missions)]
-    st.markdown(f'<div class="eyebrow">Interactive grammar · {TEXTBOOK_TITLE} · {current_unit["number"]}단원</div><h1>단어를 끌어당겨 <span class="lime">문장을 완성하세요.</span></h1><p class="sub">{current_unit["title"]}의 핵심 문장 구조를 연습합니다.</p>', unsafe_allow_html=True)
+    st.markdown(f'<div class="eyebrow interactive-grammar-eyebrow">Interactive grammar · {TEXTBOOK_TITLE} · {current_unit["number"]}단원</div><h1>단어를 끌어당겨 <span class="lime">문장을 완성하세요.</span></h1><p class="sub">{current_unit["title"]}의 핵심 문장 구조를 연습합니다.</p>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     completed_sentence_count = len(missions) if st.session_state.builder_finished else min(
         st.session_state.builder_index + (1 if st.session_state.builder_completed else 0), len(missions)
@@ -839,12 +1059,12 @@ def sentence_builder():
         cols = st.columns(len(words))
         for position, word in enumerate(words):
             with cols[position]:
-                if word not in st.session_state.builder_answer and st.button(word, key=f"builder_word_{st.session_state.builder_index}_{position}", use_container_width=True, disabled=st.session_state.builder_finished):
+                if word not in st.session_state.builder_answer and st.button(word, key=f"builder_word_{st.session_state.builder_index}_{position}", width="stretch", disabled=st.session_state.builder_finished):
                     st.session_state.builder_answer.append(word)
                     st.rerun()
         a, b, c = st.columns(3)
         with a:
-            if st.button("선택 지우고 다시 하기", key="builder_reset", use_container_width=True):
+            if st.button("선택 지우고 다시 하기", key="builder_reset", width="stretch"):
                 st.session_state.builder_answer = []
                 st.rerun()
         with b:
@@ -852,7 +1072,7 @@ def sentence_builder():
                 "문장 제출 완료 ✓" if st.session_state.builder_completed or st.session_state.builder_finished else "문장 제출하기  →",
                 key="builder_submit",
                 type="secondary" if st.session_state.builder_completed or st.session_state.builder_finished else "primary",
-                use_container_width=True,
+                width="stretch",
                 disabled=st.session_state.builder_completed or st.session_state.builder_finished,
             ):
                 if " ".join(st.session_state.builder_answer) == answer:
@@ -877,7 +1097,7 @@ def sentence_builder():
                         icon=":material/replay:",
                     )
         with c:
-            if st.session_state.builder_completed and st.button("다음 문장으로  →", key="builder_next", type="primary", use_container_width=True):
+            if st.session_state.builder_completed and st.button("다음 문장으로  →", key="builder_next", type="primary", width="stretch"):
                 st.session_state.builder_index += 1
                 st.session_state.builder_answer = []
                 st.session_state.builder_completed = False
@@ -895,7 +1115,7 @@ def sync_mode():
     c1, c2 = st.columns([1.35, 1])
     with c1:
         st.markdown('<div class="card"><div class="eyebrow">Live mission · sentence drop</div><h2>오늘의 문장 조립</h2><p class="sub">아래 단어를 올바른 순서로 배치해 보세요.</p><div style="margin:24px 0 13px"><span class="word">저는</span><span class="word">한국어를</span><span class="word">배워요</span></div><p class="tiny">제출하면 강사 화면의 참여 현황에 즉시 반영됩니다.</p></div>', unsafe_allow_html=True)
-        if st.button("정답 제출  →", type="primary", key="sync_submit", use_container_width=True):
+        if st.button("정답 제출  →", type="primary", key="sync_submit", width="stretch"):
             st.session_state.sync_submissions = min(18, st.session_state.sync_submissions + 1)
             st.success("제출되었습니다. 강사 화면에 반영되었습니다.")
     with c2:
@@ -909,6 +1129,10 @@ def sync_mode():
     with a: metric("PRONUNCIATION", "92%", "평균 정확도", "lime")
     with b: metric("SENTENCE BUILD", f"{st.session_state.sync_submissions} / 18", "완료한 학습자")
     with c: metric("CLASS ENERGY", "HIGH", "참여도 상승 중", "coral")
+
+
+def _discard_theme_css(*args, **kwargs):
+    """Keep retired theme rules out of the rendered page during rollback."""
 
 
 def inject_css():
@@ -927,11 +1151,13 @@ def inject_css():
             color:var(--lime);
         }
         .brand .course-name { color:var(--ink); }
-        .eyebrow { color:var(--lime); font:500 11px 'DM Mono', monospace; letter-spacing:1.4px; text-transform:uppercase; }
-        h1 { font-size:46px !important; line-height:1.04 !important; letter-spacing:-2.4px !important; margin:7px 0 13px !important; }
-        h2 { font-size:25px !important; letter-spacing:-1px !important; }
-        h3 { font-size:16px !important; letter-spacing:-.3px !important; }
-        .sub { color:var(--muted); font-size:15px; line-height:1.7; max-width:680px; }
+        .eyebrow { color:var(--lime); font:500 12px 'DM Mono', monospace; letter-spacing:1.2px; text-transform:uppercase; }
+        .interactive-grammar-eyebrow { line-height:1.5; }
+        .interactive-grammar-eyebrow + h1 { margin-top:12px !important; }
+        h1 { font-size:36px !important; line-height:1.12 !important; letter-spacing:-1.7px !important; margin:7px 0 13px !important; }
+        h2 { font-size:26px !important; letter-spacing:-.8px !important; }
+        h3 { font-size:20px !important; letter-spacing:-.3px !important; }
+        .sub { color:var(--muted); font-size:16px; line-height:1.7; max-width:680px; }
         .lesson-path-copy { max-width:none; }
         .unit-learning-title { font-size:30px; font-weight:850; line-height:1.2; letter-spacing:-1.2px; margin:2px 0 10px; }
         .unit-learning-title span { color:var(--lime); }
@@ -957,6 +1183,9 @@ def inject_css():
         .metric-value { font-size:31px; font-weight:800; margin-top:8px; letter-spacing:-1.5px; }
         .metric-note { color:#aaa; font-size:12px; margin-top:4px; }
         .lime { color:var(--lime); } .coral { color:var(--coral); }
+        .grammar-one { color:#ff9b72 !important; font-weight:850; }
+        .grammar-two { color:#78aef8 !important; font-weight:850; }
+        .grammar-feedback { padding:10px 12px; margin:7px 0; border-left:3px solid #78aef8; background:#172033; border-radius:7px; line-height:1.7; }
         .progress { height:6px; background:#292929; border-radius:9px; overflow:hidden; margin:17px 0 5px; }
         .progress > div { height:100%; background:var(--lime); border-radius:9px; }
         .pill { display:inline-block; border:1px solid #3e3e3e; border-radius:20px; color:#bdbdbd; padding:5px 10px; font-size:11px; margin-right:5px; }
@@ -972,8 +1201,8 @@ def inject_css():
         .lesson-row { display:flex; align-items:center; justify-content:space-between; padding:15px 0; border-bottom:1px solid #292929; }
         .lesson-row:last-child { border-bottom:0; }
         .lesson-icon { width:38px; height:38px; display:inline-flex; align-items:center; justify-content:center; background:#242424; border-radius:11px; margin-right:12px; }
-        .tiny { color:#858585; font-size:12px; }
-        div[data-testid="stButton"] button { border-radius:10px; border:1px solid #3d3d3d; background:#202020; color:#f4f4f4; font-weight:600; min-height:40px; }
+        .tiny { color:#a3a3a3; font-size:14px; }
+        div[data-testid="stButton"] button { border-radius:10px; border:1px solid #3d3d3d; background:#202020; color:#f4f4f4; font-size:16px; font-weight:600; min-height:44px; }
         div[data-testid="stButton"] button:hover { border-color:var(--lime); color:var(--lime); }
         div[data-testid="stButton"] button[kind="primary"] { background:var(--lime); color:#111; border:0; }
         [class*="st-key-vocab_navigation"] button { background:#15191e !important; border:1px solid #596575 !important; color:#c8d0da !important; min-height:34px !important; font-size:13px !important; }
@@ -989,15 +1218,219 @@ def inject_css():
         .stProgress > div > div > div > div { background:var(--lime); }
         .stRadio label, .stCheckbox label { color:#d8d8d8 !important; }
         [class*="st-key-grammar_quiz_choice_"] [role="radiogroup"] { column-gap:36px !important; row-gap:12px !important; }
+        @media (max-width: 760px) {
+            [data-testid="stMainBlockContainer"] { padding:1rem .75rem 2rem !important; }
+            h1 { font-size:30px !important; letter-spacing:-1px !important; }
+            h2 { font-size:23px !important; }
+            h3 { font-size:19px !important; }
+            .interactive-grammar-eyebrow + h1 { margin-top:9px !important; }
+            .unit-learning-title { font-size:26px; }
+            .unit-step-summary { white-space:normal; font-size:14px; }
+            div[data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; }
+            div[data-testid="column"] { min-width:min(100%, 250px) !important; flex:1 1 250px !important; }
+            div[data-testid="stTabs"] [data-baseweb="tab-list"] { overflow-x:auto; flex-wrap:nowrap; }
+            div[data-testid="stTabs"] [role="tab"] { min-width:max-content; }
+            img { max-width:100%; height:auto; }
+            div[class*="st-key-unit3_"][class*="_pair"],
+            div[class*="st-key-unit4_"][class*="_pair"],
+            div[class*="st-key-unit3_"][class*="_reference"],
+            div[class*="st-key-unit4_"][class*="_reference"] { min-height:0 !important; }
+            div[class*="st-key-unit3_"][class*="_pair"] [data-testid="stHorizontalBlock"],
+            div[class*="st-key-unit4_"][class*="_pair"] [data-testid="stHorizontalBlock"],
+            div[class*="st-key-unit3_"][class*="_reference"] [data-testid="stHorizontalBlock"],
+            div[class*="st-key-unit4_"][class*="_reference"] [data-testid="stHorizontalBlock"] {
+                display:grid !important; grid-template-columns:minmax(0, 1fr) !important;
+                gap:12px !important;
+            }
+            div[class*="st-key-unit3_"][class*="_pair"] [data-testid="stElementContainer"],
+            div[class*="st-key-unit4_"][class*="_pair"] [data-testid="stElementContainer"],
+            div[class*="st-key-unit3_"][class*="_reference"] [data-testid="stElementContainer"],
+            div[class*="st-key-unit4_"][class*="_reference"] [data-testid="stElementContainer"] {
+                position:static !important; inset:auto !important;
+                width:auto !important; height:auto !important;
+            }
+            div[class*="st-key-unit3_"][class*="_pair"] [data-testid="stColumn"],
+            div[class*="st-key-unit4_"][class*="_pair"] [data-testid="stColumn"],
+            div[class*="st-key-unit3_"][class*="_reference"] [data-testid="stColumn"],
+            div[class*="st-key-unit4_"][class*="_reference"] [data-testid="stColumn"] {
+                width:100% !important; min-width:0 !important; height:auto !important;
+            }
+        }
         </style>
         """, unsafe_allow_html=True,
     )
     themes = {
-        "검은색": {"app": "#000000", "sidebar": "#090909", "panel": "#151515", "line": "#2b2b2b", "ink": "#f3f0ea", "muted": "#9c9a9a", "accent": "#c9f66d", "button": "#202020"},
-        "남색": {"app": "#0a1020", "sidebar": "#0d1528", "panel": "#121d33", "line": "#263858", "ink": "#f2f6ff", "muted": "#9cabc4", "accent": "#76d7ff", "button": "#172642"},
-        "밝은색": {"app": "#f6f3ed", "sidebar": "#eee9df", "panel": "#ffffff", "line": "#d8d1c5", "ink": "#191919", "muted": "#6f6b65", "accent": "#527a00", "button": "#ffffff"},
+        "검은색": {"app": "#000000", "sidebar": "#090909", "panel": "#151515", "line": "#2b2b2b", "ink": "#f3f0ea", "muted": "#9c9a9a", "accent": "#c9f66d", "button": "#202020", "grammar1": "#ff9b72", "grammar2": "#78aef8", "feedback": "#172033", "step": "#d9f59a", "completed": "#ffffff", "selected_bg": "#263217", "select_border": "#737373"},
+        "남색": {"app": "#0a1020", "sidebar": "#0d1528", "panel": "#121d33", "line": "#263858", "ink": "#f2f6ff", "muted": "#9cabc4", "accent": "#76d7ff", "button": "#172642", "grammar1": "#ff9b72", "grammar2": "#8bbcff", "feedback": "#17233b", "step": "#bdeeff", "completed": "#ffffff", "selected_bg": "#173452", "select_border": "#60799f"},
+        "밝은색": {"app": "#f6f3ed", "sidebar": "#eee9df", "panel": "#ffffff", "line": "#d8d1c5", "ink": "#191919", "muted": "#6f6b65", "accent": "#527a00", "button": "#ffffff", "grammar1": "#ff9b72", "grammar2": "#78aef8", "feedback": "#172033", "step": "#d9f59a", "completed": "#ffffff", "selected_bg": "#202020", "select_border": "#999187"},
     }
     theme = themes.get(st.session_state.get("app_theme", "검은색"), themes["검은색"])
+    _discard_theme_css(
+        f"""
+        <style>
+        :root {{
+            --ink:{theme['ink']}; --muted:{theme['muted']}; --panel:{theme['panel']};
+            --line:{theme['line']}; --lime:{theme['accent']};
+            --grammar-one:{theme['grammar1']}; --grammar-two:{theme['grammar2']};
+            --feedback-bg:{theme['feedback']}; --step-summary:{theme['step']};
+            --completed-tab:{theme['completed']};
+        }}
+        .stApp {{ background:{theme['app']}; color:{theme['ink']}; }}
+        [data-testid="stSidebar"] {{ background:{theme['sidebar']}; border-right-color:{theme['line']}; }}
+        [data-testid="stSidebar"] {{
+            --background-color:{theme['sidebar']};
+            --secondary-background-color:{theme['selected_bg']};
+            --text-color:{theme['ink']};
+            --primary-color:{theme['accent']};
+        }}
+        div[data-testid="stButton"] button {{ background:{theme['button']}; color:{theme['ink']}; border-color:{theme['line']}; }}
+        .stRadio label, .stCheckbox label {{ color:{theme['ink']} !important; }}
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5, .stApp h6,
+        .stApp [data-testid="stMarkdownContainer"] p,
+        .stApp [data-testid="stMarkdownContainer"] li,
+        .stApp [data-testid="stCaptionContainer"],
+        .stApp [data-testid="stWidgetLabel"] p,
+        .stApp [data-baseweb="tab"] {{ color:{theme['ink']}; }}
+        .stApp [data-testid="stCaptionContainer"] {{ color:{theme['muted']} !important; }}
+        .stApp input, .stApp textarea,
+        .stApp [data-baseweb="select"] > div,
+        .stApp [data-baseweb="select"] input {{ color:{theme['ink']} !important; }}
+        .stApp [data-baseweb="select"] svg {{ fill:{theme['ink']} !important; }}
+        div[data-testid="stButton"] button p {{ color:{theme['ink']}; }}
+        div[data-testid="stButton"] button[kind="primary"] p {{ color:#111; }}
+        [data-testid="stSidebar"] div.st-key-app_language div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] div.st-key-app_theme div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] div.st-key-selected_unit_label div[data-baseweb="select"] > div {{
+            background:{theme['selected_bg']} !important;
+            border:2px solid {theme['accent']} !important;
+            color:{theme['ink']} !important;
+            font-weight:750 !important;
+            box-shadow:0 0 0 2px color-mix(in srgb, {theme['accent']} 18%, transparent) !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"],
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] {{
+            background:{theme['selected_bg']} !important;
+            background-color:{theme['selected_bg']} !important;
+            background-image:none !important;
+            border-color:{theme['accent']} !important;
+            color:{theme['ink']} !important;
+            opacity:1 !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div > div,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] [role="combobox"] > div {{
+            background:transparent !important;
+            background-color:transparent !important;
+            color:{theme['ink']} !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] div,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] button,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] [aria-hidden="true"] {{
+            background:transparent !important;
+            background-color:transparent !important;
+            border-color:transparent !important;
+            color:{theme['ink']} !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] input,
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] input:read-only {{
+            background:{theme['selected_bg']} !important;
+            background-color:{theme['selected_bg']} !important;
+            color:{theme['ink']} !important;
+            -webkit-text-fill-color:{theme['ink']} !important;
+            caret-color:{theme['ink']} !important;
+            opacity:1 !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] svg {{
+            fill:{theme['ink']} !important;
+            color:{theme['ink']} !important;
+            stroke:{theme['ink']} !important;
+            opacity:1 !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] svg path {{
+            fill:{theme['ink']} !important;
+            stroke:{theme['ink']} !important;
+        }}
+        [data-testid="stSidebar"] div.st-key-app_language div[data-baseweb="select"] > div > div,
+        [data-testid="stSidebar"] div.st-key-app_theme div[data-baseweb="select"] > div > div,
+        [data-testid="stSidebar"] div.st-key-selected_unit_label div[data-baseweb="select"] > div > div,
+        [data-testid="stSidebar"] div.st-key-app_language div[data-baseweb="select"] input,
+        [data-testid="stSidebar"] div.st-key-app_theme div[data-baseweb="select"] input,
+        [data-testid="stSidebar"] div.st-key-selected_unit_label div[data-baseweb="select"] input {{
+            background:transparent !important;
+            color:{theme['ink']} !important;
+            -webkit-text-fill-color:{theme['ink']} !important;
+            font-weight:750 !important;
+        }}
+        [data-testid="stSidebar"] div.st-key-app_language div[data-baseweb="select"] span,
+        [data-testid="stSidebar"] div.st-key-app_theme div[data-baseweb="select"] span,
+        [data-testid="stSidebar"] div.st-key-selected_unit_label div[data-baseweb="select"] span {{
+            color:{theme['ink']} !important;
+        }}
+        [data-testid="stSidebar"] div.st-key-app_language div[data-baseweb="select"] > div:hover,
+        [data-testid="stSidebar"] div.st-key-app_theme div[data-baseweb="select"] > div:hover,
+        [data-testid="stSidebar"] div.st-key-selected_unit_label div[data-baseweb="select"] > div:hover {{
+            border-color:{theme['accent']} !important;
+            filter:brightness(.97);
+        }}
+        [data-baseweb="popover"],
+        [data-baseweb="popover"] > div,
+        [data-baseweb="popover"] [role="listbox"] {{
+            background:{theme['panel']} !important;
+            color:{theme['ink']} !important;
+        }}
+        [data-baseweb="popover"] [role="option"] {{
+            background:{theme['panel']} !important;
+            color:{theme['ink']} !important;
+        }}
+        [data-baseweb="popover"] [role="option"]:hover {{
+            background:color-mix(in srgb, {theme['selected_bg']} 65%, {theme['panel']}) !important;
+        }}
+        [data-baseweb="popover"] [role="option"][aria-selected="true"] {{
+            background:{theme['selected_bg']} !important;
+            color:{theme['ink']} !important;
+            font-weight:800 !important;
+        }}
+        [data-testid="stHeader"], .stAppHeader,
+        [data-testid="stToolbar"], [data-testid="stStatusWidget"] {{
+            background:{theme['app']} !important;
+            color:{theme['ink']} !important;
+        }}
+        [data-testid="stHeader"] button,
+        [data-testid="stToolbar"] button {{
+            color:{theme['ink']} !important;
+            background:transparent !important;
+        }}
+        [data-testid="stHeader"] button:hover,
+        [data-testid="stToolbar"] button:hover {{
+            background:{theme['selected_bg']} !important;
+        }}
+        [data-testid="stHeader"] svg,
+        [data-testid="stToolbar"] svg,
+        [data-testid="stStatusWidget"] svg {{
+            fill:{theme['ink']} !important;
+            color:{theme['ink']} !important;
+        }}
+        [data-testid="stDecoration"] {{ background:{theme['accent']} !important; }}
+        [data-testid="stSidebar"] div.st-key-page_nav [role="radiogroup"] label {{
+            border-left:4px solid transparent;
+            border-radius:8px;
+            padding:.42rem .55rem;
+        }}
+        [data-testid="stSidebar"] div.st-key-page_nav [role="radiogroup"] label:hover {{
+            background:color-mix(in srgb, {theme['selected_bg']} 55%, transparent);
+        }}
+        [data-testid="stSidebar"] div.st-key-page_nav [role="radiogroup"] label:has(input:checked) {{
+            background:{theme['selected_bg']} !important;
+            border-left-color:{theme['accent']} !important;
+        }}
+        [data-testid="stSidebar"] div.st-key-page_nav [role="radiogroup"] label:has(input:checked) p {{
+            color:{theme['accent']} !important;
+            font-weight:850 !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown(
         f"""
         <style>
@@ -1006,6 +1439,19 @@ def inject_css():
         [data-testid="stSidebar"] {{ background:{theme['sidebar']}; border-right-color:{theme['line']}; }}
         div[data-testid="stButton"] button {{ background:{theme['button']}; color:{theme['ink']}; border-color:{theme['line']}; }}
         .stRadio label, .stCheckbox label {{ color:{theme['ink']} !important; }}
+        [data-testid="stSidebar"] div[data-baseweb="select"] {{
+            border-color:{theme['select_border']} !important;
+            outline:1px solid {theme['select_border']} !important;
+            outline-offset:1px !important;
+            border-radius:9px !important;
+            box-shadow:0 0 0 1px color-mix(in srgb, {theme['select_border']} 30%, transparent) !important;
+        }}
+        [data-testid="stSidebar"] div[data-baseweb="select"]:hover,
+        [data-testid="stSidebar"] div[data-baseweb="select"]:focus-within {{
+            border-color:{theme['accent']} !important;
+            outline-color:{theme['accent']} !important;
+            box-shadow:0 0 0 1px {theme['accent']} !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -1022,7 +1468,7 @@ def sync_mode():
     c1, c2 = st.columns([1.35, 1])
     with c1:
         st.markdown('<div class="card"><div class="eyebrow">Live mission · 03:42 left</div><h2>오늘의 문장 조립</h2><p class="sub">주어진 단어를 올바른 순서로 배치해 보세요.</p><div style="margin:24px 0 13px"><span class="word answer">저는</span><span class="word answer">한국어를</span><span class="word answer">배워요</span></div><p class="tiny">정답을 제출하면 강사 화면에 즉시 반영됩니다.</p></div>', unsafe_allow_html=True)
-        st.button("정답 제출  →", type="primary", use_container_width=True)
+        st.button("정답 제출  →", type="primary", width="stretch")
     with c2:
         st.markdown('<div class="card"><div class="eyebrow">Instructor control</div><h3>현재 진행 상황</h3>', unsafe_allow_html=True)
         st.progress(0.68)
@@ -1052,11 +1498,11 @@ def dashboard():
     st.markdown("<br>", unsafe_allow_html=True)
     left, right = st.columns([1.25, 1])
     with left:
-        if st.button("NEXT · 받침 발음 훈련  →", type="primary", key="next_lesson", use_container_width=True):
+        if st.button("NEXT · 받침 발음 훈련  →", type="primary", key="next_lesson", width="stretch"):
             st.session_state.go_practice = True
             st.rerun()
         st.markdown('<div class="card"><div class="eyebrow">Continue learning</div><h2>오늘의 10분 루틴</h2><div class="lesson-row"><span><span class="lesson-icon">◉</span><b>받침 발음 훈련</b><br><span class="tiny">발음 · 5분</span></span></div><div class="lesson-row"><span><span class="lesson-icon">✦</span><b>카페에서 주문하기</b><br><span class="tiny">회화 · 5분</span></span><span class="tiny">잠금 해제</span></div></div>', unsafe_allow_html=True)
-        if st.button("학습 시작하기  →", type="primary", use_container_width=True):
+        if st.button("학습 시작하기  →", type="primary", width="stretch"):
             st.session_state.go_practice = True
             st.rerun()
     with right:
@@ -1084,7 +1530,7 @@ def assignments():
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="card"><div class="lesson-row"><span><span class="lesson-icon">◌</span><b>카페 주문 롤플레이</b><br><span class="tiny">회화 녹음 · 마감 08.28</span></span><span class="pill active">IN PROGRESS</span></div><p class="sub">“아이스 아메리카노 한 잔 주세요.”를 자연스럽게 말하고 30초 음성으로 제출하세요.</p></div>', unsafe_allow_html=True)
     st.file_uploader("음성 파일 업로드", type=["mp3", "wav", "m4a"])
-    if st.button("과제 제출하기  →", type="primary", use_container_width=True): st.success("제출 준비가 완료되었습니다. 강사 피드백을 기다려 주세요.")
+    if st.button("과제 제출하기  →", type="primary", width="stretch"): st.success("제출 준비가 완료되었습니다. 강사 피드백을 기다려 주세요.")
 
 
 def practice():
@@ -1249,7 +1695,7 @@ def pronunciation_mission():
         audio = st.file_uploader("음성 파일 업로드", type=["wav", "mp3", "m4a", "webm"], key="pronunciation_audio_real")
         if audio:
             st.audio(audio.getvalue(), format=audio.type or "audio/wav")
-            if st.button("OpenAI로 발음 분석하기", type="primary", use_container_width=True):
+            if st.button("OpenAI로 발음 분석하기", type="primary", width="stretch"):
                 transcript, error = transcribe_audio(audio)
                 if error:
                     st.warning(error)
@@ -1285,7 +1731,7 @@ def sync_mode():
     c1, c2 = st.columns([1.35, 1])
     with c1:
         st.markdown('<div class="card"><div class="eyebrow">Live mission · sentence drop</div><h2>오늘의 문장 조합</h2><p class="sub">아래 단어를 조합해 올바른 문장을 만들어 보세요.</p><div style="margin:24px 0 13px"><span class="word">저는</span><span class="word">한국어를</span><span class="word">배워요</span></div></div>', unsafe_allow_html=True)
-        if st.button("정답 제출 →", type="primary", key="sync_submit_real", use_container_width=True):
+        if st.button("정답 제출 →", type="primary", key="sync_submit_real", width="stretch"):
             st.session_state.sync_submissions = min(18, local_submissions + 1)
             publish_sync_state(st.session_state.sync_submissions)
             st.success("제출되었습니다. Firebase 연결 시 다른 화면에도 반영됩니다.")
@@ -1320,7 +1766,7 @@ def teacher_dashboard():
     with left:
         st.markdown('<div class="card"><div class="eyebrow">Live class control</div><h2>다음 미션 배포</h2><p class="sub">모든 학습자 화면에 표시할 활동을 선택하세요.</p>', unsafe_allow_html=True)
         mission = st.selectbox("미션", ["문장 조합 · 카페 주문", "받침 발음 · 한국어", "조사 복습 · 은/는"], label_visibility="collapsed")
-        if st.button("교실에 미션 보내기  →", type="primary", use_container_width=True):
+        if st.button("교실에 미션 보내기  →", type="primary", width="stretch"):
             st.session_state.teacher_mission = mission
             st.session_state.sync_submissions = 0
             publish_sync_state(0)
@@ -1331,7 +1777,7 @@ def teacher_dashboard():
         st.markdown(f'<div class="card"><div class="eyebrow">Current mission</div><h2>{mission_label}</h2><div class="progress"><div style="width:67%"></div></div><div style="display:flex;justify-content:space-between"><span class="tiny">제출 16 / 24</span><span class="tiny lime">67%</span></div><br><span class="pill active">LIVE</span></div>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="eyebrow">Learner signals</div><h2>학습자 현황</h2>', unsafe_allow_html=True)
-    st.dataframe(students, use_container_width=True, hide_index=True)
+    st.dataframe(students, width="stretch", hide_index=True)
     st.caption("‘도움 필요’ 학습자는 맞춤 복습 큐와 발음 미션을 먼저 확인해 주세요.")
 
 
@@ -1420,6 +1866,7 @@ def render_unit_learning_order(current_unit):
     """Make the intended unit sequence visible before learners start clicking around."""
     unit_number = current_unit["number"]
     section = LESSON_SECTION_CONTENT[unit_number]
+    english = english_support_enabled()
     unit_step_summaries = {
         1: ("나라·직업 익히기", "이에요·예요 익히기", "은·는 익히기", "인사 정보 확인하기", "자기소개 말하기"),
         2: ("숫자·전화번호 읽기", "이·가 익히기", "아니에요 익히기", "전화번호 확인하기", "연락처 묻고 쓰기"),
@@ -1428,14 +1875,28 @@ def render_unit_learning_order(current_unit):
         5: ("장소·식품 어휘 익히기", "에 가다 익히기", "하고 익히기", "마트 대화하기", "백화점 쇼핑 쓰기"),
         6: ("고유어 수 익히기", "단위 명사 익히기", "-(으)세요 익히기", "과일 가게 대화하기", "편의점 목록 쓰기"),
         7: ("시간 어휘 익히기", "시간의 에 익히기", "몇 시 표현 익히기", "시계·활동 연결하기", "시간표 말하기"),
-        8: ("날씨 어휘 익히기", "아요·어요 익히기", "날씨 형용사 익히기", "날씨 표현 연결하기", "오늘 날씨 말하기"),
+        8: ("날씨 어휘 익히기", "안 부정 표현 익히기", "ㅂ 불규칙 익히기", "날씨 표현 연결하기", "오늘 날씨 말하기"),
         9: ("장소·활동 익히기", "에서 익히기", "과거 표현 익히기", "과거 활동 연결하기", "어제 일 말하기"),
         10: ("제안 어휘 익히기", "을까요 익히기", "으러 가다 익히기", "제안 표현 확인하기", "약속 정해 말하기"),
     }
     summaries = unit_step_summaries[unit_number]
+    if english:
+        summaries = (
+            "Learn the key words",
+            f"Practice {section['grammar1']}",
+            f"Practice {section['grammar2']}",
+            "Use the forms in context",
+            "Create your own response",
+        )
+    intro = (
+        "Follow the five steps in order. Complete Vocabulary & expressions before moving to Grammar 1."
+        if english
+        else "아래 5단계를 순서대로 진행하세요. 1단계의 어휘와 표현을 마친 뒤 2단계로 넘어갑니다."
+    )
+    learning_title = f"Unit {current_unit['number']} · 5-step lesson" if english else f"{current_unit['number']}단원 · 단원 학습 5단계"
     st.markdown(
-        f'<div class="unit-learning-title"><span>{current_unit["number"]}단원</span> · 단원 학습 5단계</div>'
-        '<div class="unit-learning-intro">아래 5단계를 순서대로 진행하세요. 1단계의 어휘와 표현을 마친 뒤 2단계로 넘어갑니다.</div>',
+        f'<div class="unit-learning-title"><span>{learning_title}</span></div>'
+        f'<div class="unit-learning-intro">{intro}</div>',
         unsafe_allow_html=True,
     )
     steps = [
@@ -1449,7 +1910,19 @@ def render_unit_learning_order(current_unit):
     for column, (number, title, description) in zip(columns, steps):
         with column:
             with st.container(border=True, height=150):
-                st.markdown(f"### {number}단계")
+                stage_label = f"Step {number}" if english else f"{number}단계"
+                base_title = title.split(" · ", 1)[0]
+                english_title = {
+                    "어휘와 표현": "Vocabulary & expressions",
+                    "문법 1": "Grammar 1",
+                    "문법 2": "Grammar 2",
+                    "활동 1": "Activity 1",
+                    "활동 2": "Activity 2",
+                }[base_title]
+                if english:
+                    grammar_name = title.split(" · ", 1)[1] if " · " in title else ""
+                    title = f"{english_title} · {grammar_name}" if grammar_name else english_title
+                st.markdown(f"### {stage_label}")
                 st.markdown(f"**{title}**")
                 st.markdown(f'<div class="unit-step-summary">{description}</div>', unsafe_allow_html=True)
     st.space("small")
@@ -1477,7 +1950,7 @@ def render_unit2_place_phone_quiz():
                     width=260,
                 )
                 st.markdown(f"**{place_name}**")
-                st.info(f"안내 전화 · {correct_phone}", icon=":material/call:")
+                render_learning_info(f"안내 전화 · {correct_phone}", icon=":material/call:")
                 st.caption(f"한국어로 읽기 · {phone_reading}")
             selected_phone = st.selectbox(
                 f"{place_name} 전화번호는 몇 번이에요?",
@@ -1490,7 +1963,7 @@ def render_unit2_place_phone_quiz():
     place_results = st.session_state.get("unit2_activity2_place_results")
     place_button_columns = st.columns([1, 1, 2])
     with place_button_columns[0]:
-        if st.button("1번 답 확인", key="unit2_activity2_place_check", type="primary", disabled=not place_answers_ready, use_container_width=True):
+        if st.button("1번 답 확인", key="unit2_activity2_place_check", type="primary", disabled=not place_answers_ready, width="stretch"):
             st.session_state["unit2_activity2_place_results"] = [
                 selected == place_phone_cards[index][2]
                 for index, selected in enumerate(place_phone_answers)
@@ -1498,29 +1971,37 @@ def render_unit2_place_phone_quiz():
             place_results = st.session_state["unit2_activity2_place_results"]
     with place_button_columns[1]:
         if place_results is not None:
-            st.button("확인 닫기", key="unit2_activity2_place_result_close", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=("unit2_activity2_place_results",))
+            st.button("확인 닫기", key="unit2_activity2_place_result_close", type="secondary", width="stretch", on_click=clear_session_state_key, args=("unit2_activity2_place_results",))
 
     if place_results is not None:
         if all(place_results):
-            st.success("두 문제 모두 정답이에요.", icon=":material/check_circle:")
+            render_learning_success("두 문제 모두 정답이에요.", icon=":material/check_circle:")
         else:
             incorrect_places = [
                 place_phone_cards[index]
                 for index, is_correct in enumerate(place_results)
                 if not is_correct
             ]
-            st.warning("다시 확인할 장소: " + ", ".join(place[0] for place in incorrect_places))
+            render_learning_warning("다시 확인할 장소: " + ", ".join(place[0] for place in incorrect_places))
             for place_name, _, correct_phone, phone_reading, _ in incorrect_places:
-                st.info(f"{place_name} 정답: {correct_phone} ({phone_reading})")
+                render_learning_info(f"{place_name} 정답: {correct_phone} ({phone_reading})")
 
 
 def render_learning_lock(message):
     st.markdown(f"<div class='learning-lock'><b>잠금</b>{message}</div>", unsafe_allow_html=True)
 
 
+def remember_reference_image(image_name):
+    """Remember the current unit image so every related question can reopen it in place."""
+    global ACTIVE_REFERENCE_IMAGE
+    image_path = Path(__file__).with_name("assets") / "units" / image_name
+    ACTIVE_REFERENCE_IMAGE = str(image_path)
+    return image_path
+
+
 def render_unit_visual(unit_number, image_name, caption):
     """Show an original unit illustration in a consistent, readable canvas."""
-    st.image(Path(__file__).with_name("assets") / "units" / image_name, width="stretch")
+    st.image(remember_reference_image(image_name), width="stretch")
     st.caption(caption)
 
 
@@ -1528,6 +2009,10 @@ def render_choice_set(unit_number, stage, questions, completion_key=None, dialog
     """Render beginner-friendly selection questions and store completion after a perfect check."""
     selections = []
     for index, (prompt, options, answer, hint) in enumerate(questions):
+        if ACTIVE_REFERENCE_IMAGE:
+            with st.popover(f"{index + 1}번 참고 그림 다시 보기", width="stretch"):
+                st.image(ACTIVE_REFERENCE_IMAGE, width="stretch")
+                st.caption("그림을 확인한 뒤 창을 닫으면 현재 문제 위치에서 계속할 수 있어요.")
         if dialogue_layout:
             dialogue_lines = "<br>".join(html.escape(line) for line in prompt.splitlines())
             st.markdown(
@@ -1562,12 +2047,15 @@ def render_choice_set(unit_number, stage, questions, completion_key=None, dialog
     results = st.session_state.get(result_key)
     if results is not None:
         if all(results):
-            st.success(f"{len(results)}문제를 모두 정확하게 풀었어요!", icon=":material/check_circle:")
+            render_learning_success(f"{len(results)}문제를 모두 정확하게 풀었어요!", icon=":material/check_circle:")
         else:
-            st.warning(f"{sum(results)}/{len(results)}개가 맞아요. 설명을 읽고 다시 선택해 보세요.")
+            render_learning_warning(f"{sum(results)}/{len(results)}개가 맞아요. 설명을 읽고 다시 선택해 보세요.")
         for index, (is_correct, question) in enumerate(zip(results, questions)):
             if not is_correct:
-                st.info(f"{index + 1}번 정답: {question[2]} · {question[3]}", icon=":material/lightbulb:")
+                feedback = highlight_learning_text(
+                    f"{index + 1}번 정답: {question[2]} · {question[3]}", unit_number
+                )
+                st.markdown(f'<div class="grammar-feedback">{feedback}</div>', unsafe_allow_html=True)
     return bool(results) and all(results)
 
 
@@ -1575,9 +2063,9 @@ def render_unit3_grammar2():
     st.markdown("**핵심 대화를 먼저 읽어 보세요.**")
     dialogue_columns = st.columns(2)
     with dialogue_columns[0]:
-        st.info("가: 책이 어디에 있어요?\n\n나: 책상 위에 있어요.", icon=":material/forum:")
+        render_learning_info("가: 책이 어디에 있어요?\n\n나: 책상 위에 있어요.", icon=":material/forum:")
     with dialogue_columns[1]:
-        st.info("가: 유진 씨가 집에 있어요?\n\n나: 아니요. 집에 없어요. 교실에 있어요.", icon=":material/forum:")
+        render_learning_info("가: 유진 씨가 집에 있어요?\n\n나: 아니요. 집에 없어요. 교실에 있어요.", icon=":material/forum:")
     presence_questions = [
         ("컴퓨터가 교실에 있어요?", ["네, 교실에 있어요.", "아니요, 교실에 없어요."], "네, 교실에 있어요.", "노트북 컴퓨터가 왼쪽 책상 위에 있어요."),
         ("가방이 교실에 있어요?", ["네, 교실에 있어요.", "아니요, 교실에 없어요."], "네, 교실에 있어요.", "빨간 가방이 의자 옆에 있어요."),
@@ -1598,13 +2086,19 @@ def render_unit3_grammar2():
         div.st-key-unit3_grammar2_reference { margin-top:-16px; }
         div.st-key-unit3_grammar2_reference [data-testid="stHorizontalBlock"] {
             display: grid;
-            grid-template-columns: 440px minmax(0, 1fr);
+            grid-template-columns: 500px 500px;
             gap: 16px !important;
             align-items: start;
         }
         div.st-key-unit3_grammar2_reference [data-testid="stColumn"]:first-child {
-            width: 440px !important;
-            min-width: 440px !important;
+            width: 500px !important;
+            min-width: 500px !important;
+            height: 334px !important;
+        }
+        div.st-key-unit3_grammar2_reference [data-testid="stColumn"]:nth-child(2) {
+            width: 500px !important;
+            min-width: 500px !important;
+            height: 334px !important;
         }
         div.st-key-unit3_grammar2_reference [data-testid="stColumn"]:nth-child(2)
         [data-testid="stVerticalBlock"] {
@@ -1642,15 +2136,15 @@ def render_unit3_grammar2():
         with picture_column:
             st.image(
                 fit_image_to_canvas(
-                    Path(__file__).with_name("assets") / "units" / "unit3-grammar2-classroom.png",
-                    canvas_size=(440, 294), image_size=(440, 294),
+                    remember_reference_image("unit3-grammar2-classroom.png"),
+                    canvas_size=(500, 334), image_size=(500, 334),
                 ),
-                width=440,
+                width=500,
             )
         with guide_column:
-            st.success("**있어요:** 사람이나 물건이 그 장소에 있어요.  \n예: 교실에 컴퓨터가 있어요.")
-            st.warning("**없어요:** 사람이나 물건이 그 장소에 없어요.  \n예: 교실에 피아노가 없어요.")
-            st.info("**어디에 있어요?:** 장소를 물을 때 사용해요.  \n예: 가방이 어디에 있어요?")
+            render_learning_success("**있어요:** 사람이나 물건이 그 장소에 있어요.  \n예: 교실에 컴퓨터가 있어요.")
+            render_learning_warning("**없어요:** 사람이나 물건이 그 장소에 없어요.  \n예: 교실에 피아노가 없어요.")
+            render_learning_info("**어디에 있어요?:** 장소를 물을 때 사용해요.  \n예: 가방이 어디에 있어요?")
             st.markdown('<div class="unit3-person-label">그림 속 사람 · 유진 씨</div>', unsafe_allow_html=True)
 
     activity1_column, activity2_column = st.columns(2, gap="large", vertical_alignment="top")
@@ -1664,14 +2158,14 @@ def render_unit3_grammar2():
         location_done = render_choice_set(3, "grammar2_location", location_questions)
     if presence_done and location_done:
         st.session_state["grammar2_done_3"] = True
-        st.success("문법 2의 1번과 2번 활동을 모두 완료했어요!", icon=":material/check_circle:")
+        render_learning_success("문법 2의 1번과 2번 활동을 모두 완료했어요!", icon=":material/check_circle:")
     else:
         st.session_state.pop("grammar2_done_3", None)
 
 
 def render_unit3_grammar1_intro():
     """Teach 이/그/저 with one compact distance scene and two guided activities."""
-    st.info(
+    render_learning_info(
         "‘이’는 말하는 사람에게 가까이 있는 사람이나 물건을 가리켜요.\n\n"
         "‘그’는 듣는 사람에게 가까이 있는 사람이나 물건을 가리켜요.\n\n"
         "‘저’는 두 사람 모두에게서 멀리 있는 사람이나 물건을 가리켜요.",
@@ -1680,9 +2174,9 @@ def render_unit3_grammar1_intro():
     st.markdown("**대화로 먼저 익혀 보세요**")
     dialogue_examples = st.columns(2)
     with dialogue_examples[0]:
-        st.info("가: 이 책은 누구 책이에요?\n\n나: 제 책이에요.", icon=":material/forum:")
+        render_learning_info("가: 이 책은 누구 책이에요?\n\n나: 제 책이에요.", icon=":material/forum:")
     with dialogue_examples[1]:
-        st.info("가: 저 의자는 교실 의자예요?\n\n나: 네, 교실 의자예요.", icon=":material/forum:")
+        render_learning_info("가: 저 의자는 교실 의자예요?\n\n나: 네, 교실 의자예요.", icon=":material/forum:")
     st.space("small")
     st.markdown(
         """
@@ -1691,36 +2185,36 @@ def render_unit3_grammar1_intro():
         div.st-key-unit3_grammar1_rule_pair [data-testid="stHorizontalBlock"] {
             display: block !important;
             position: relative;
-            min-height: 347px;
+            min-height: 334px;
         }
         div.st-key-unit3_grammar1_rule_pair [data-testid="stColumn"]:first-child {
-            width: 520px !important;
-            min-width: 520px !important;
+            width: 500px !important;
+            min-width: 500px !important;
         }
         div.st-key-unit3_grammar1_rule_pair [data-testid="stColumn"]:first-child
         [data-testid="stImage"] img {
-            width: 520px !important;
-            height: 347px !important;
+            width: 500px !important;
+            height: 334px !important;
             object-fit: contain;
             display: block;
         }
         div.st-key-unit3_grammar1_rule_pair [data-testid="stColumn"]:nth-child(2)
         {
             position: absolute !important;
-            left: 536px;
+            left: 516px;
             top: 0;
-            width: 300px !important;
-            min-width: 300px !important;
-            height: 347px !important;
+            width: 500px !important;
+            min-width: 500px !important;
+            height: 334px !important;
         }
         div.st-key-unit3_grammar1_rule_pair [data-testid="stColumn"]:nth-child(2)
         [data-testid="stVerticalBlock"] {
-            height: 347px !important;
+            height: 334px !important;
             justify-content: space-between !important;
         }
         div.st-key-unit3_grammar1_rule_pair [data-testid="stColumn"]:nth-child(2)
         [data-testid="stAlert"] {
-            width: 300px !important;
+            width: 500px !important;
         }
         div.st-key-unit3_grammar1_rule_pair [data-testid="stColumn"]:nth-child(2)
         [data-testid="stAlertContentSuccess"] p,
@@ -1739,15 +2233,15 @@ def render_unit3_grammar1_intro():
         with picture_column:
             st.image(
                 fit_image_to_canvas(
-                    Path(__file__).with_name("assets") / "units" / "unit3-demonstratives.png",
-                    canvas_size=(520, 347), image_size=(520, 347),
+                    remember_reference_image("unit3-demonstratives.png"),
+                    canvas_size=(500, 334), image_size=(500, 334),
                 ),
-                width=520,
+                width=500,
             )
         with rule_column:
-            st.success("**‘이’는 말하는 사람에게 가까이**\n\n여자 가까이 → 이 책")
-            st.info("**‘그’는 듣는 사람에게 가까이**\n\n남자 가까이 → 그 가방")
-            st.warning("**‘저’는 두 사람 모두에게서 멀리**\n\n두 사람에게서 멀리 → 저 의자")
+            render_learning_success("**‘이’는 말하는 사람에게 가까이**\n\n여자 가까이 → 이 책")
+            render_learning_info("**‘그’는 듣는 사람에게 가까이**\n\n남자 가까이 → 그 가방")
+            render_learning_warning("**‘저’는 두 사람 모두에게서 멀리**\n\n두 사람에게서 멀리 → 저 의자")
     st.markdown("### 1. 그림을 보고 알맞은 말을 선택해 보세요.")
     first_questions = [
         ("여자가 들고 있는 책", ["이 책", "그 책", "저 책"], "이 책", "책은 말하는 여자 가까이에 있어요."),
@@ -1757,7 +2251,7 @@ def render_unit3_grammar1_intro():
     first_done = render_choice_set(3, "grammar1_picture", first_questions)
     st.divider()
     st.markdown("### 2. 대화를 완성하고 소리 내어 읽어 보세요.")
-    st.info("가: 이 책은 누구 책이에요?\n\n나: 제 책이에요.", icon=":material/forum:")
+    render_learning_info("가: 이 책은 누구 책이에요?\n\n나: 제 책이에요.", icon=":material/forum:")
     second_questions = [
         ("가: ___ 책은 마리 씨 책이에요? (말하는 마리 가까이)  \n나: 네, 제 책이에요.", ["이", "그", "저"], "이", "말하는 사람인 마리 가까이에 있으므로 ‘이’를 사용해요."),
         ("가: ___ 가방은 주노 씨 가방이에요? (말을 듣는 주노 가까이)  \n나: 네, 제 가방이에요.", ["이", "그", "저"], "그", "듣는 사람인 주노 가까이에 있으므로 ‘그’를 사용해요."),
@@ -1766,7 +2260,7 @@ def render_unit3_grammar1_intro():
     second_done = render_choice_set(3, "grammar1_dialogue_v2", second_questions, dialogue_layout=True)
     if first_done and second_done:
         st.session_state["unit3_grammar1_activities_completed"] = True
-        st.success("문법 1의 1번과 2번 활동을 모두 완료했어요!", icon=":material/check_circle:")
+        render_learning_success("문법 1의 1번과 2번 활동을 모두 완료했어요!", icon=":material/check_circle:")
     else:
         st.session_state.pop("unit3_grammar1_activities_completed", None)
     st.divider()
@@ -1783,46 +2277,46 @@ def render_unit3_vocabulary_dialogue():
         div.st-key-unit3_vocab_dialogue_pair { margin-top:-16px; }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stHorizontalBlock"] {
             display: grid;
-            grid-template-columns: 420px 420px;
+            grid-template-columns: 500px 500px;
             gap: 10mm;
             align-items: start;
             justify-content: start;
         }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stColumn"] {
-            width: 420px !important;
-            min-width: 420px !important;
-            height: 280px !important;
-            min-height: 280px !important;
-            max-height: 280px !important;
+            width: 500px !important;
+            min-width: 500px !important;
+            height: 334px !important;
+            min-height: 334px !important;
+            max-height: 334px !important;
         }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stColumn"]
         > [data-testid="stVerticalBlock"] {
-            height: 280px !important;
-            min-height: 280px !important;
-            max-height: 280px !important;
+            height: 334px !important;
+            min-height: 334px !important;
+            max-height: 334px !important;
         }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stColumn"]
         [data-testid="stElementContainer"] {
-            height: 280px !important;
-            min-height: 280px !important;
-            max-height: 280px !important;
+            height: 334px !important;
+            min-height: 334px !important;
+            max-height: 334px !important;
         }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stImage"],
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stImage"] img {
-            width: 420px !important;
-            height: 280px !important;
-            min-height: 280px !important;
-            max-height: 280px !important;
+            width: 500px !important;
+            height: 334px !important;
+            min-height: 334px !important;
+            max-height: 334px !important;
             object-fit: cover;
             display: block;
         }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stAlert"],
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stAlertContainer"] {
             box-sizing: border-box;
-            width: 420px !important;
-            height: 280px !important;
-            min-height: 280px !important;
-            max-height: 280px !important;
+            width: 500px !important;
+            height: 334px !important;
+            min-height: 334px !important;
+            max-height: 334px !important;
             margin: 0 !important;
         }
         div.st-key-unit3_vocab_dialogue_pair [data-testid="stAlert"] {
@@ -1841,14 +2335,14 @@ def render_unit3_vocabulary_dialogue():
         with picture_column:
             st.image(
                 fit_image_to_canvas(
-                    Path(__file__).with_name("assets") / "units" / "unit3-classroom-locations.png",
-                    canvas_size=(420, 280),
-                    image_size=(420, 280),
+                    remember_reference_image("unit3-classroom-locations.png"),
+                    canvas_size=(500, 334),
+                    image_size=(500, 334),
                 ),
-                width=420,
+                width=500,
             )
         with dialogue_column:
-            st.info(
+            render_learning_info(
                 "**보기**\n\n"
                 "가: 필통이 어디에 있어요?\n\n"
                 "나: 필통이 책 옆에 있어요.",
@@ -1939,7 +2433,7 @@ def render_unit3_vocabulary_panel(vocabulary_words, active_index, example_senten
         with st.container(border=True, key="unit3_vocab_reference"):
             st.image(
                 fit_image_to_canvas(
-                    Path(__file__).with_name("assets") / "units" / "unit3-classroom-locations.png",
+                    remember_reference_image("unit3-classroom-locations.png"),
                     canvas_size=(500, 334),
                     image_size=(500, 334),
                 ),
@@ -1954,7 +2448,7 @@ def render_unit3_vocabulary_panel(vocabulary_words, active_index, example_senten
                 st.button(
                     vocabulary_words[index], key=f"vocab_select_3_{index}",
                     type="primary" if index == active_index else "secondary",
-                    on_click=select_vocabulary, args=(3, index), use_container_width=True,
+                    on_click=select_vocabulary, args=(3, index), width="stretch",
                 )
         st.markdown(
             '<div class="unit3-selected-example-heading">선택한 단어와 예문</div>',
@@ -1964,7 +2458,7 @@ def render_unit3_vocabulary_panel(vocabulary_words, active_index, example_senten
         revealed_key = "vocab_revealed_3"
         meaning_button_column, meaning_text_column = st.columns([1, 3], gap=None, vertical_alignment="center")
         with meaning_button_column:
-            if st.button("뜻 보기 / 뜻 가리기", key="vocab_flip_3", use_container_width=True):
+            if st.button("뜻 보기 / 뜻 가리기", key="vocab_flip_3", width="stretch"):
                 st.session_state[revealed_key] = not st.session_state.get(revealed_key, False)
                 st.rerun()
         with meaning_text_column:
@@ -1973,7 +2467,7 @@ def render_unit3_vocabulary_panel(vocabulary_words, active_index, example_senten
                     f"{selected_word} = {selected_meaning}",
                     key="unit3_meaning_text",
                     disabled=True,
-                    use_container_width=True,
+                    width="stretch",
                 )
     st.markdown("### 2. 어디에 있어요?")
     st.caption("위치 표현을 하나씩 누르고 예문을 소리 내어 읽어 보세요.")
@@ -1984,12 +2478,12 @@ def render_unit3_vocabulary_panel(vocabulary_words, active_index, example_senten
             st.button(
                 vocabulary_words[index], key=f"vocab_select_3_{index}",
                 type="primary" if index == active_index else "secondary",
-                on_click=select_vocabulary, args=(3, index), use_container_width=True,
+                on_click=select_vocabulary, args=(3, index), width="stretch",
             )
 
 
 def render_unit4_grammar2():
-    st.info(
+    render_learning_info(
         "행동의 대상이 되는 명사 뒤에 ‘을/를’을 붙여 말해요. 받침이 있으면 ‘을’, 받침이 없으면 ‘를’을 사용해요.",
         icon=":material/school:",
     )
@@ -2022,7 +2516,7 @@ def render_unit4_grammar2():
     with st.container(key="unit4_grammar2_reference_pair"):
         st.image(
             fit_image_to_canvas(
-                Path(__file__).with_name("assets") / "units" / "unit4-study-movie.png",
+                remember_reference_image("unit4-study-movie.png"),
                 canvas_size=(500, 334), image_size=(500, 334),
             ), width=500,
         )
@@ -2044,14 +2538,14 @@ def render_unit4_grammar2():
     st.caption("받침이 있는 말에는 ‘을’, 받침이 없는 말에는 ‘를’을 붙이는 방법을 대화로 확인하세요.")
     example_columns = st.columns(2)
     with example_columns[0]:
-        st.info(
+        render_learning_info(
             ":orange[가: 무엇을 좋아해요?]\n\n"
             ":blue[나: 꽃을 좋아해요.]\n\n"
             "꽃 + 을 → 꽃을",
             icon=":material/forum:",
         )
     with example_columns[1]:
-        st.info(
+        render_learning_info(
             ":orange[가: 무엇을 좋아해요?]\n\n"
             ":blue[나: 커피를 좋아해요.]\n\n"
             "커피 + 를 → 커피를",
@@ -2082,7 +2576,7 @@ def render_unit4_grammar2():
     dialogue_done = render_choice_set(4, "grammar2_dialogue", dialogue_questions, dialogue_layout=True)
     if preference_done and dialogue_done:
         st.session_state["grammar2_done_4"] = True
-        st.success("문법 2의 1번과 2번 활동을 모두 완료했어요!", icon=":material/celebration:")
+        render_learning_success("문법 2의 1번과 2번 활동을 모두 완료했어요!", icon=":material/celebration:")
     else:
         st.session_state.pop("grammar2_done_4", None)
         if preference_done and not dialogue_done:
@@ -2097,10 +2591,10 @@ def render_unit4_vocabulary_panel(vocabulary_words, active_index, example_senten
     with picture_column:
         st.image(
             fit_image_to_canvas(
-                Path(__file__).with_name("assets") / "units" / "unit4-action-grid.png",
-                canvas_size=(520, 347), image_size=(520, 347),
+                remember_reference_image("unit4-action-grid.png"),
+                canvas_size=(500, 334), image_size=(500, 334),
             ),
-            width=520,
+            width=500,
         )
     with word_column:
         for start in range(0, len(vocabulary_words), 5):
@@ -2110,7 +2604,7 @@ def render_unit4_vocabulary_panel(vocabulary_words, active_index, example_senten
                     st.button(
                         vocabulary_words[index], key=f"vocab_select_4_{index}",
                         type="primary" if index == active_index else "secondary",
-                        on_click=select_vocabulary, args=(4, index), use_container_width=True,
+                        on_click=select_vocabulary, args=(4, index), width="stretch",
                     )
         st.markdown("**선택한 동사의 예문**")
         render_vocabulary_example(example_sentence, color="lime")
@@ -2139,7 +2633,7 @@ def render_unit4_vocabulary_panel(vocabulary_words, active_index, example_senten
 
 
 def render_unit4_grammar1_intro():
-    st.info(
+    render_learning_info(
         "동사를 공손한 현재형으로 바꾸어 오늘 하는 일을 묻고 답해요. ‘아’ 또는 ‘오’ 계열 모음 뒤에는 ‘-아요’, 그 밖에는 ‘-어요’를 사용하고 ‘하다’는 ‘해요’가 돼요.",
         icon=":material/school:",
     )
@@ -2186,7 +2680,7 @@ def render_unit4_grammar1_intro():
     with st.container(key="unit4_grammar1_reference_pair"):
         st.image(
             fit_image_to_canvas(
-                Path(__file__).with_name("assets") / "units" / "unit4-action-grid.png",
+                remember_reference_image("unit4-action-grid.png"),
                 canvas_size=(500, 334), image_size=(500, 334),
             ), width=500,
         )
@@ -2231,7 +2725,7 @@ def render_unit4_grammar1_intro():
         "일하다": "일해요",
     }
     selected_action = st.selectbox("오늘 할 일", list(speaking_actions), key="unit4_grammar1_speaking_action")
-    st.info(
+    render_learning_info(
         ":orange[가: 오늘 무엇을 해요?]\n\n"
         f":blue[나: {speaking_actions[selected_action]}.]",
         icon=":material/record_voice_over:",
@@ -2239,7 +2733,7 @@ def render_unit4_grammar1_intro():
     if st.button("2번 대화를 두 번 읽었어요", key="unit4_grammar1_speaking_check", type="primary"):
         st.session_state["unit4_grammar1_speaking_completed"] = True
     if st.session_state.get("unit4_grammar1_speaking_completed", False):
-        st.success("2번 말하기 연습을 완료했어요.", icon=":material/check_circle:")
+        render_learning_success("2번 말하기 연습을 완료했어요.", icon=":material/check_circle:")
     st.divider()
 
 
@@ -2250,9 +2744,9 @@ def render_unit3_activity1():
         <style>
         div.st-key-unit3_activity1_pair { margin-top:-16px; }
         .unit3-activity-dialogue-box {
-            width: 520px;
+            width: 500px;
             max-width: 100%;
-            height: 347px;
+            height: 334px;
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
@@ -2272,13 +2766,13 @@ def render_unit3_activity1():
         .unit3-activity-dialogue-box .speaker-b { color: #78aef8; }
         div.st-key-unit3_activity1_pair {
             position: relative;
-            min-height: 347px;
+            min-height: 334px;
         }
         div.st-key-unit3_activity1_pair [data-testid="stElementContainer"]:has(.unit3-activity-dialogue-box) {
             position: absolute;
-            left: calc(520px + 16px);
+            left: calc(500px + 16px);
             top: 0;
-            width: 520px;
+            width: 500px;
             z-index: 1;
         }
         </style>
@@ -2288,10 +2782,10 @@ def render_unit3_activity1():
     with st.container(key="unit3_activity1_pair"):
         st.image(
             fit_image_to_canvas(
-                Path(__file__).with_name("assets") / "units" / "unit3-people-belongings.png",
-                canvas_size=(520, 347), image_size=(520, 347),
+                remember_reference_image("unit3-people-belongings.png"),
+                canvas_size=(500, 334), image_size=(500, 334),
             ),
-            width=520,
+            width=500,
         )
         st.markdown(
             """
@@ -2326,7 +2820,7 @@ def render_unit3_activity1():
     ])
     selected_row = st.selectbox("연습할 대화", list(dialogue_rows), key="unit3_activity1_dialogue_row")
     name, item, location, owner = dialogue_rows[selected_row]
-    st.info(
+    render_learning_info(
         f":orange[가: 이 {item}이 {name} 씨 {item}이에요?]\n\n"
         f":blue[나: 아니요. 제 {item}은 {location}에 있어요.]\n\n"
         f":orange[가: 그럼 누구 {item}이에요?]\n\n"
@@ -2337,10 +2831,10 @@ def render_unit3_activity1():
         st.session_state["unit3_activity1_dialogue_completed"] = True
     dialogue_done = st.session_state.get("unit3_activity1_dialogue_completed", False)
     if dialogue_done:
-        st.success("2번 말하기 연습을 완료했어요.", icon=":material/check_circle:")
+        render_learning_success("2번 말하기 연습을 완료했어요.", icon=":material/check_circle:")
     if reading_done and dialogue_done:
         st.session_state["activity1_completed_3"] = True
-        st.success("친구의 가방 1번과 2번 활동을 모두 완료했어요!", icon=":material/celebration:")
+        render_learning_success("친구의 가방 1번과 2번 활동을 모두 완료했어요!", icon=":material/celebration:")
     else:
         st.session_state.pop("activity1_completed_3", None)
 
@@ -2393,12 +2887,12 @@ def render_unit4_activity1():
         with scene_column:
             st.image(
                 fit_image_to_canvas(
-                    Path(__file__).with_name("assets") / "units" / "unit4-study-movie.png",
+                    remember_reference_image("unit4-study-movie.png"),
                     canvas_size=(500, 334), image_size=(500, 334),
                 ), width=500,
             )
         with dialogue_column:
-            st.info(
+            render_learning_info(
                 ":orange[재민: 마리 씨, 오늘 뭐 해요?]\n\n"
                 ":blue[마리: 한국어를 공부해요.]\n\n"
                 ":orange[마리: 재민 씨는 뭐 해요?]\n\n"
@@ -2424,7 +2918,7 @@ def render_unit4_activity1():
     }
     selected_row = st.selectbox("연습할 사람과 할 일", list(activity_rows), key="unit4_activity1_row")
     person, action = activity_rows[selected_row]
-    st.info(
+    render_learning_info(
         f":orange[가: {person} 씨, 오늘 뭐 해요?]\n\n"
         f":blue[나: 저는 {action}.]\n\n"
         ":orange[가: 그래요? 저는 한국어를 공부해요.]",
@@ -2434,10 +2928,10 @@ def render_unit4_activity1():
         st.session_state["unit4_activity1_speaking_completed"] = True
     speaking_done = st.session_state.get("unit4_activity1_speaking_completed", False)
     if speaking_done:
-        st.success("완성한 대화를 소리 내어 읽는 연습을 완료했어요.", icon=":material/check_circle:")
+        render_learning_success("완성한 대화를 소리 내어 읽는 연습을 완료했어요.", icon=":material/check_circle:")
     if reading_done and speaking_done:
         st.session_state["activity1_completed_4"] = True
-        st.success("활동 1의 읽기와 말하기를 모두 완료했어요!", icon=":material/celebration:")
+        render_learning_success("활동 1의 읽기와 말하기를 모두 완료했어요!", icon=":material/celebration:")
     else:
         st.session_state.pop("activity1_completed_4", None)
 
@@ -2449,9 +2943,9 @@ def render_unit3_activity2():
         <style>
         div.st-key-unit3_activity2_pair { margin-top:-16px; }
         .unit3-activity-room-box {
-            width: 520px;
+            width: 500px;
             max-width: 100%;
-            height: 347px;
+            height: 334px;
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
@@ -2465,13 +2959,13 @@ def render_unit3_activity2():
         .unit3-activity-room-box p { margin: 7px 0; }
         div.st-key-unit3_activity2_pair {
             position: relative;
-            min-height: 347px;
+            min-height: 334px;
         }
         div.st-key-unit3_activity2_pair [data-testid="stElementContainer"]:has(.unit3-activity-room-box) {
             position: absolute;
-            left: calc(520px + 16px);
+            left: calc(500px + 16px);
             top: 0;
-            width: 520px;
+            width: 500px;
             z-index: 1;
         }
         </style>
@@ -2481,10 +2975,10 @@ def render_unit3_activity2():
     with st.container(key="unit3_activity2_pair"):
         st.image(
             fit_image_to_canvas(
-                Path(__file__).with_name("assets") / "units" / "unit3-juno-room.png",
-                canvas_size=(520, 347), image_size=(520, 347),
+                remember_reference_image("unit3-juno-room.png"),
+                canvas_size=(500, 334), image_size=(500, 334),
             ),
-            width=520,
+            width=500,
         )
         st.markdown(
             """
@@ -2521,7 +3015,7 @@ def render_unit3_activity2():
                 key="unit3_activity2_room_drawing",
                 label_visibility="collapsed",
             )
-            st.info("그림에 침대·책상·의자·책·가방 등의 위치를 표시해 보세요.", icon=":material/draw:")
+            render_learning_info("그림에 침대·책상·의자·책·가방 등의 위치를 표시해 보세요.", icon=":material/draw:")
     with writing_column:
         with st.container(border=True, height=420):
             st.markdown("#### 나의 방 소개")
@@ -2538,7 +3032,7 @@ def render_unit3_activity2():
             f"제 방이에요. {first_location.strip()}에 {first_item.strip()}{first_particle} 있어요. "
             f"{second_location.strip()}에 {second_item.strip()}{second_particle} 있어요."
         )
-        st.success(room_description, icon=":material/edit_note:")
+        render_learning_success(room_description, icon=":material/edit_note:")
     if not reading_done:
         st.caption("먼저 1번의 두 문제를 모두 맞혀 주세요.")
     elif not writing_ready:
@@ -2548,7 +3042,7 @@ def render_unit3_activity2():
 
 def render_unit4_activity2():
     st.subheader("활동 2 · 유진 씨와 안나 씨의 오늘")
-    st.info(
+    render_learning_info(
         "문자 메시지에서 두 사람의 장소와 지금 하는 일을 확인한 뒤, 여러분의 오늘을 세 문장으로 써 보세요.",
         icon=":material/school:",
     )
@@ -2641,7 +3135,7 @@ def render_unit4_activity2():
     st.divider()
     st.markdown("### 2. 여러분은 오늘 무엇을 해요? 써 보세요.")
     st.caption("교재의 공책 활동처럼 장소 한 곳과 오늘 하는 일 두 가지를 골라 세 문장으로 완성하세요.")
-    st.info(
+    render_learning_info(
         "**쓰기 순서**\n\n"
         "① 저는 지금 ___에 있어요.\n\n"
         "② 오늘 ___을/를 해요.\n\n"
@@ -2659,7 +3153,7 @@ def render_unit4_activity2():
     response = ""
     if writing_ready:
         response = f"저는 지금 {place.strip()}에 있어요. 오늘 {first_action}. 그리고 {second_action}."
-        st.success(response, icon=":material/edit_note:")
+        render_learning_success(response, icon=":material/edit_note:")
     if not message_done:
         st.caption("먼저 1번 문자 메시지의 두 문제를 모두 맞혀 주세요.")
     elif not writing_ready:
@@ -2668,7 +3162,8 @@ def render_unit4_activity2():
 
 
 def render_unit5_reference(image_name, box_class, box_html, horizontal_crop=None):
-    """Show a fixed Unit 5 illustration and an equally sized guide 16px apart."""
+    """Show a responsive reference pair and remember its image for nearby questions."""
+    global ACTIVE_REFERENCE_IMAGE
     key = f"unit5_{box_class}_pair"
     st.markdown(
         f"""
@@ -2680,9 +3175,36 @@ def render_unit5_reference(image_name, box_class, box_html, horizontal_crop=None
             color:#dbe7f5; line-height:1.7;
         }}
         .{box_class} p {{ margin:7px 0; }}
-        div.st-key-{key} {{ position:relative; min-height:334px; margin-top:-16px; }}
-        div.st-key-{key} [data-testid="stElementContainer"]:has(.{box_class}) {{
-            position:absolute; left:516px; top:0; width:500px; height:334px; z-index:1;
+        div.st-key-{key} {{ width:1016px; max-width:100%; margin-top:-16px; }}
+        div.st-key-{key} [data-testid="stHorizontalBlock"] {{
+            display:grid; grid-template-columns:500px 500px;
+            align-items:start; gap:16px !important;
+        }}
+        div.st-key-{key} [data-testid="stColumn"] {{
+            width:500px !important; min-width:500px !important; height:334px !important;
+        }}
+        div.st-key-{key} [data-testid="stColumn"]:first-child {{
+            position:sticky; top:1rem; align-self:flex-start;
+        }}
+        div.st-key-{key} [data-testid="stImage"],
+        div.st-key-{key} [data-testid="stImage"] img {{
+            width:500px !important; height:334px !important; object-fit:contain; display:block;
+        }}
+        @media (max-width:760px) {{
+            div.st-key-{key} {{ width:100%; }}
+            div.st-key-{key} [data-testid="stHorizontalBlock"] {{
+                display:grid; grid-template-columns:minmax(0, 1fr); gap:12px !important;
+            }}
+            div.st-key-{key} [data-testid="stColumn"] {{
+                width:100% !important; min-width:0 !important; height:auto !important;
+            }}
+            div.st-key-{key} [data-testid="stColumn"]:first-child {{ position:static; }}
+            .{box_class} {{ width:100%; height:auto; min-height:0; aspect-ratio:500/334; padding:18px; }}
+            div.st-key-{key} [data-testid="stImage"],
+            div.st-key-{key} [data-testid="stImage"] img {{
+                width:100% !important; height:auto !important; aspect-ratio:500/334;
+                object-fit:contain;
+            }}
         }}
         </style>
         """,
@@ -2690,6 +3212,7 @@ def render_unit5_reference(image_name, box_class, box_html, horizontal_crop=None
     )
     with st.container(key=key):
         image_path = Path(__file__).with_name("assets") / "units" / image_name
+        ACTIVE_REFERENCE_IMAGE = str(image_path)
         if horizontal_crop is None:
             reference_image = fit_image_to_canvas(
                 image_path, canvas_size=(500, 334), image_size=(500, 334)
@@ -2711,10 +3234,13 @@ def render_unit5_reference(image_name, box_class, box_html, horizontal_crop=None
                     (334 - fitted_crop.height) // 2,
                 )
                 reference_image.paste(fitted_crop, crop_offset, fitted_crop)
-        st.image(
-            reference_image, width=500,
-        )
-        st.markdown(f'<div class="{box_class}">{box_html}</div>', unsafe_allow_html=True)
+        image_column, guide_column = st.columns(2, gap="small", vertical_alignment="top")
+        with image_column:
+            st.image(reference_image, width="stretch")
+        with guide_column:
+            unit_number = st.session_state.get("selected_unit_number", 5)
+            highlighted_html = highlight_learning_text(box_html, unit_number, escape=False)
+            st.markdown(f'<div class="{box_class}">{highlighted_html}</div>', unsafe_allow_html=True)
 
 
 def render_unit5_vocabulary_panel(vocabulary_words, active_index, example_sentence):
@@ -2733,7 +3259,7 @@ def render_unit5_vocabulary_panel(vocabulary_words, active_index, example_senten
         with column:
             st.button(vocabulary_words[index], key=f"vocab_select_5_{index}",
                       type="primary" if index == active_index else "secondary",
-                      on_click=select_vocabulary, args=(5, index), use_container_width=True)
+                      on_click=select_vocabulary, args=(5, index), width="stretch")
     st.markdown("**식품**")
     for start in (6, 10):
         columns = st.columns(4)
@@ -2741,7 +3267,7 @@ def render_unit5_vocabulary_panel(vocabulary_words, active_index, example_senten
             with column:
                 st.button(vocabulary_words[index], key=f"vocab_select_5_{index}",
                           type="primary" if index == active_index else "secondary",
-                          on_click=select_vocabulary, args=(5, index), use_container_width=True)
+                          on_click=select_vocabulary, args=(5, index), width="stretch")
     render_vocabulary_example(example_sentence, color="lime" if active_index < 6 else "coral")
     st.divider()
     st.markdown("### 2. 그림에 알맞은 말을 선택해 보세요.")
@@ -2774,7 +3300,7 @@ def render_unit5_vocabulary_panel(vocabulary_words, active_index, example_senten
 
 
 def render_unit5_grammar1_intro():
-    st.info("이동하는 목적지 뒤에 ‘에’를 붙여 ‘어디에 가요?’라고 묻고 ‘장소에 가요’라고 대답해요.", icon=":material/school:")
+    render_learning_info("이동하는 목적지 뒤에 ‘에’를 붙여 ‘어디에 가요?’라고 묻고 ‘장소에 가요’라고 대답해요.", icon=":material/school:")
     render_unit5_reference(
         "unit5-places-foods.png", "unit5-grammar1-guide",
         "<p><b>가:</b> 마리 씨, 어디에 가요?</p><p><b>나:</b> 영화관에 가요.</p>"
@@ -2793,7 +3319,7 @@ def render_unit5_grammar1_intro():
     st.markdown("### 2. 어디에 가요? 무엇을 해요?")
     destination = st.selectbox("가는 장소", ["세종학당", "공원", "식당", "카페", "마트"], key="unit5_g1_destination")
     action = {"세종학당":"한국어를 공부해요", "공원":"운동해요", "식당":"밥을 먹어요", "카페":"커피를 마셔요", "마트":"장을 봐요"}[destination]
-    st.info(f":orange[가: 어디에 가요?]\n\n:blue[나: {destination}에 가요.]\n\n:orange[가: 뭐 해요?]\n\n:blue[나: {action}.]", icon=":material/forum:")
+    render_learning_info(f":orange[가: 어디에 가요?]\n\n:blue[나: {destination}에 가요.]\n\n:orange[가: 뭐 해요?]\n\n:blue[나: {action}.]", icon=":material/forum:")
     if st.button("2번 대화를 두 번 읽었어요", key="unit5_g1_speaking_done", type="primary"):
         st.session_state["unit5_grammar1_speaking_completed"] = True
     speaking_done = st.session_state.get("unit5_grammar1_speaking_completed", False)
@@ -2804,7 +3330,7 @@ def render_unit5_grammar1_intro():
 
 
 def render_unit5_grammar2():
-    st.info("두 개 이상의 명사나 사람을 나란히 연결할 때 ‘하고’를 사용해요.", icon=":material/school:")
+    render_learning_info("두 개 이상의 명사나 사람을 나란히 연결할 때 ‘하고’를 사용해요.", icon=":material/school:")
     render_unit5_reference(
         "unit5-department-store-v2.png", "unit5-grammar2-guide",
         "<p><b>가:</b> 수지 씨는 뭘 사요?</p><p><b>나:</b> 신발하고 옷을 사요.</p>"
@@ -2824,13 +3350,13 @@ def render_unit5_grammar2():
     item1 = st.selectbox("첫 번째 물건", ["시계", "칠판", "책상", "컴퓨터"], key="unit5_g2_item1")
     item2 = st.selectbox("두 번째 물건", ["칠판", "의자", "책", "가방"], key="unit5_g2_item2")
     item2_particle = subject_particle(item2)
-    st.info(f"교실에 {item1}하고 {item2}{item2_particle} 있어요.", icon=":material/forum:")
+    render_learning_info(f"교실에 {item1}하고 {item2}{item2_particle} 있어요.", icon=":material/forum:")
     if st.button("2번 문장을 소리 내어 읽었어요", key="unit5_g2_speaking_done", type="primary"):
         st.session_state["unit5_grammar2_speaking_completed"] = True
     speaking_done = st.session_state.get("unit5_grammar2_speaking_completed", False)
     if first_done and speaking_done:
         st.session_state["grammar2_done_5"] = True
-        st.success("문법 2의 1번과 2번 활동을 모두 완료했어요!", icon=":material/check_circle:")
+        render_learning_success("문법 2의 1번과 2번 활동을 모두 완료했어요!", icon=":material/check_circle:")
     else:
         st.session_state.pop("grammar2_done_5", None)
 
@@ -2852,7 +3378,7 @@ def render_unit5_activity1():
     st.markdown("### 2. 어디에 가요? 무엇을 사요?")
     place = st.selectbox("장소", ["식당", "백화점", "학교", "마트"], key="unit5_a1_place")
     items = {"식당":"라면하고 김밥을 먹어요", "백화점":"옷하고 신발을 사요", "학교":"한국어하고 영어를 공부해요", "마트":"빵하고 우유를 사요"}[place]
-    st.info(f"가: 어디에 가요?\n\n나: {place}에 가요.\n\n가: 뭘 해요?\n\n나: {items}.", icon=":material/record_voice_over:")
+    render_learning_info(f"가: 어디에 가요?\n\n나: {place}에 가요.\n\n가: 뭘 해요?\n\n나: {items}.", icon=":material/record_voice_over:")
     if st.button("2번 대화를 두 번 읽었어요", key="unit5_a1_speaking_done", type="primary"):
         st.session_state["unit5_activity1_speaking_completed"] = True
     if reading_done and st.session_state.get("unit5_activity1_speaking_completed", False):
@@ -2880,40 +3406,54 @@ def render_unit5_activity2():
     second = st.selectbox("두 번째 물건", ["신발", "옷", "가방", "화장품", "모자"], key="unit5_a2_second")
     second_object_particle = "을" if subject_particle(second) == "이" else "를"
     response = f"저는 백화점에 가요. {first}하고 {second}{second_object_particle} 사요."
-    st.success(response, icon=":material/edit_note:")
+    render_learning_success(response, icon=":material/edit_note:")
     return response if reading_done and first != second else ""
 
 
 def render_unit6_reference(image_name, box_class, box_html, guide_width=500):
-    """Show a fixed 500×334 Unit 6 image and guide with a 16px gap."""
+    """Show a responsive reference pair and remember its image for nearby questions."""
+    global ACTIVE_REFERENCE_IMAGE
     key = f"unit6_{box_class}_pair"
     st.markdown(
         f"""
         <style>
         .{box_class} {{
-            width:{guide_width}px; height:334px; box-sizing:border-box; display:flex;
+            width:500px; height:334px; box-sizing:border-box; display:flex;
             flex-direction:column; justify-content:center; padding:26px;
             border:1px solid #334155; border-radius:10px; background:#172033;
             color:#dbe7f5; line-height:1.65;
         }}
         .{box_class} p {{ margin:6px 0; }}
-        div.st-key-{key} {{ margin-top:-16px; }}
+        div.st-key-{key} {{ width:1016px; max-width:100%; margin-top:-16px; }}
         div.st-key-{key} [data-testid="stHorizontalBlock"] {{
-            display:grid; grid-template-columns:500px {guide_width}px;
+            display:grid; grid-template-columns:500px 500px;
             gap:16px !important; align-items:start; justify-content:start;
         }}
-        div.st-key-{key} [data-testid="stColumn"]:first-child {{
-            width:500px !important; min-width:500px !important;
-            height:334px !important;
+        div.st-key-{key} [data-testid="stColumn"] {{
+            width:500px !important; min-width:500px !important; height:334px !important;
         }}
-        div.st-key-{key} [data-testid="stColumn"]:last-child {{
-            width:{guide_width}px !important; min-width:{guide_width}px !important;
-            height:334px !important;
+        div.st-key-{key} [data-testid="stColumn"]:first-child {{
+            position:sticky; top:1rem; align-self:flex-start;
         }}
         div.st-key-{key} [data-testid="stImage"],
         div.st-key-{key} [data-testid="stImage"] img {{
             width:500px !important; height:334px !important;
             object-fit:cover; display:block;
+        }}
+        @media (max-width:760px) {{
+            div.st-key-{key} {{ width:100%; }}
+            div.st-key-{key} [data-testid="stHorizontalBlock"] {{
+                display:grid; grid-template-columns:minmax(0, 1fr); gap:12px !important;
+            }}
+            div.st-key-{key} [data-testid="stColumn"] {{
+                width:100% !important; min-width:0 !important; height:auto !important;
+            }}
+            div.st-key-{key} [data-testid="stColumn"]:first-child {{ position:static; }}
+            .{box_class} {{ width:100%; height:auto; min-height:0; aspect-ratio:500/334; padding:18px; }}
+            div.st-key-{key} [data-testid="stImage"],
+            div.st-key-{key} [data-testid="stImage"] img {{
+                width:100% !important; height:auto !important; object-fit:contain;
+            }}
         }}
         </style>
         """,
@@ -2923,9 +3463,12 @@ def render_unit6_reference(image_name, box_class, box_html, guide_width=500):
         image_column, guide_column = st.columns(2, gap=None, vertical_alignment="top")
         with image_column:
             image_path = Path(__file__).with_name("assets") / "units" / image_name
-            st.image(fit_image_to_canvas(image_path, canvas_size=(500, 334), image_size=(500, 334)), width=500)
+            ACTIVE_REFERENCE_IMAGE = str(image_path)
+            st.image(fit_image_to_canvas(image_path, canvas_size=(500, 334), image_size=(500, 334)), width="stretch")
         with guide_column:
-            st.markdown(f'<div class="{box_class}">{box_html}</div>', unsafe_allow_html=True)
+            unit_number = st.session_state.get("selected_unit_number", 6)
+            highlighted_html = highlight_learning_text(box_html, unit_number, escape=False)
+            st.markdown(f'<div class="{box_class}">{highlighted_html}</div>', unsafe_allow_html=True)
 
 
 def render_unit6_vocabulary_panel(vocabulary_words, active_index, example_sentence):
@@ -2942,7 +3485,7 @@ def render_unit6_vocabulary_panel(vocabulary_words, active_index, example_senten
             with column:
                 st.button(vocabulary_words[index], key=f"vocab_select_6_{index}",
                           type="primary" if index == active_index else "secondary",
-                          on_click=select_vocabulary, args=(6, index), use_container_width=True)
+                          on_click=select_vocabulary, args=(6, index), width="stretch")
     render_vocabulary_example(example_sentence, color="lime")
     st.divider()
     st.markdown("### 2. 그림 속 물건은 몇 개 있어요? 알맞은 것을 선택해 보세요.")
@@ -2966,7 +3509,7 @@ def render_unit6_vocabulary_panel(vocabulary_words, active_index, example_senten
 
 
 def render_unit6_grammar1_intro():
-    st.info("사람이나 물건을 셀 때 대상에 맞는 단위 명사를 사용해요.", icon=":material/school:")
+    render_learning_info("사람이나 물건을 셀 때 대상에 맞는 단위 명사를 사용해요.", icon=":material/school:")
     render_unit6_reference(
         "unit6-counter-dialogue.png", "unit6-grammar1-guide",
         "<p><b style='color:#ff9b72'>가:</b> 뭘 사요?　<b style='color:#78aef8'>나:</b> 빵을 한 개 사요.</p>"
@@ -2998,7 +3541,7 @@ def render_unit6_grammar1_intro():
     item = st.selectbox("교실 물건", ["책상", "의자", "컴퓨터", "시계"], key="unit6_g1_item")
     count = st.selectbox("수량", ["한 개", "두 개", "세 개", "네 개", "다섯 개"], key="unit6_g1_count")
     item_particle = subject_particle(item)
-    st.info(f"가: 교실에 {item}{item_particle} 몇 개 있어요?\n\n나: {item}{item_particle} {count} 있어요.", icon=":material/forum:")
+    render_learning_info(f"가: 교실에 {item}{item_particle} 몇 개 있어요?\n\n나: {item}{item_particle} {count} 있어요.", icon=":material/forum:")
     if st.button("2번 대화를 두 번 읽었어요", key="unit6_g1_speaking_done", type="primary"):
         st.session_state["unit6_grammar1_speaking_completed"] = True
     done = picture_done and st.session_state.get("unit6_grammar1_speaking_completed", False)
@@ -3009,7 +3552,7 @@ def render_unit6_grammar1_intro():
 
 
 def render_unit6_grammar2():
-    st.info("상대방에게 공손하게 행동을 요청할 때 동사에 ‘-(으)세요’를 붙여요.", icon=":material/school:")
+    render_learning_info("상대방에게 공손하게 행동을 요청할 때 동사에 ‘-(으)세요’를 붙여요.", icon=":material/school:")
     render_unit6_reference(
         "unit6-convenience-store.png", "unit6-grammar2-guide",
         "<p><b>형태:</b> <b style='color:#b7ef58'>동사 + -(으)세요</b></p>"
@@ -3036,7 +3579,7 @@ def render_unit6_grammar2():
     second_done = render_choice_set(6, "grammar2_forms", forms)
     if first_done and second_done:
         st.session_state["grammar2_done_6"] = True
-        st.success("문법 2의 1번과 2번을 모두 완료했어요.", icon=":material/check_circle:")
+        render_learning_success("문법 2의 1번과 2번을 모두 완료했어요.", icon=":material/check_circle:")
     else:
         st.session_state.pop("grammar2_done_6", None)
 
@@ -3057,7 +3600,7 @@ def render_unit6_activity1():
     st.markdown("### 2. 무엇을 사요? 과일과 수량을 정하고 대화해 보세요.")
     fruit = st.selectbox("과일", ["사과", "배", "귤", "복숭아"], key="unit6_a1_fruit")
     quantity = st.selectbox("수량", ["한 개", "두 개", "세 개", "네 개", "다섯 개"], key="unit6_a1_quantity")
-    st.info(f"주인: 무엇을 드릴까요?\n\n나: {fruit} {quantity} 주세요.", icon=":material/record_voice_over:")
+    render_learning_info(f"주인: 무엇을 드릴까요?\n\n나: {fruit} {quantity} 주세요.", icon=":material/record_voice_over:")
     if st.button("2번 대화를 두 번 읽었어요", key="unit6_a1_speaking_done", type="primary"):
         st.session_state["unit6_activity1_speaking_completed"] = True
     if reading_done and st.session_state.get("unit6_activity1_speaking_completed", False):
@@ -3092,17 +3635,17 @@ def render_unit6_activity2():
     response = ""
     if ready:
         response = f"저는 편의점에서 {selected[0][0]} {selected[0][1]}하고 {selected[1][0]} {selected[1][1]}, {selected[2][0]} {selected[2][1]}를 사요."
-        st.success(response, icon=":material/edit_note:")
+        render_learning_success(response, icon=":material/edit_note:")
     else:
         st.caption("서로 다른 물건 세 가지와 수량을 모두 선택해 주세요.")
     return response if reading_done and ready else ""
 
 
 def render_unit8_grammar1():
-    st.info("동사나 형용사 앞에 ‘안’을 넣어 하지 않거나 그렇지 않다고 말해요.", icon=":material/school:")
+    render_learning_info("동사나 형용사 앞에 ‘안’을 넣어 하지 않거나 그렇지 않다고 말해요.", icon=":material/school:")
     render_unit6_reference("unit8-an-negative.png", "unit8-grammar1-guide", "<p><b>가:</b> 서울은 날씨가 좋아요?</p><p><b>나:</b> 아니요. <b style='color:#78aef8'>안</b> 좋아요. 비가 와요.</p><p><b>가:</b> 오늘 운동해요?</p><p><b>나:</b> 아니요. 운동 <b style='color:#78aef8'>안</b> 해요.</p><p style='margin-top:16px'><b>형태:</b> <b style='color:#b7ef58'>안 + 동사/형용사</b></p>")
     st.markdown("### 1. 다음 예와 같이 빈칸에 알맞은 표현을 선택해 대화를 완성해 보세요.")
-    st.info(
+    render_learning_info(
         "**예**\n\n가: 오늘 날씨가 추워요?\n\n나: 아니요. 오늘은 :orange[**안**] 추워요.",
         icon=":material/lightbulb:",
     )
@@ -3126,7 +3669,7 @@ def render_unit8_grammar1():
         "쇼핑해요": "쇼핑 :orange[**안**] 해요",
         "요리해요": "요리 :orange[**안**] 해요",
     }[action]
-    st.info(
+    render_learning_info(
         f"가: 오늘 {action}?\n\n나: 아니요. 오늘 {negative_action}.",
         icon=":material/forum:",
     )
@@ -3135,7 +3678,7 @@ def render_unit8_grammar1():
 
 
 def render_unit8_grammar2():
-    st.info("ㅂ 받침으로 끝나는 일부 형용사는 모음으로 시작하는 어미 앞에서 ㅂ이 우/오로 바뀌어요.", icon=":material/school:")
+    render_learning_info("ㅂ 받침으로 끝나는 일부 형용사는 모음으로 시작하는 어미 앞에서 ㅂ이 우/오로 바뀌어요.", icon=":material/school:")
     render_unit6_reference("unit8-b-irregular.png", "unit8-grammar2-guide", "<p><b>가:</b> 날씨가 어때요?</p><p><b>나:</b> 좀 <b style='color:#78aef8'>추워요</b>.</p><p><b>가:</b> 가방이 무거워요?</p><p><b>나:</b> 아니요. <b style='color:#78aef8'>가벼워요</b>.</p><p style='margin-top:16px'><b>형태:</b> <b style='color:#b7ef58'>춥다 → 추워요, 무겁다 → 무거워요</b></p>")
     st.markdown("### 1. 그림을 보고 대화를 완성해 보세요.")
     qs=[("한국은 겨울 날씨가 어때요?\n좀 ___.",["추워요","춥어요","추어요"],"추워요","춥다 → 추워요로 바뀌어요."),("공부가 어려워요?\n네. 좀 ___.",["어려워요","어렵어요","어려어요"],"어려워요","어렵다 → 어려워요로 바뀌어요."),("김치가 어때요?\n맛있어요. 그런데 좀 ___.",["매워요","맵어요","매어요"],"매워요","맵다 → 매워요로 바뀌어요."),("가방이 무거워요?\n네, 아주 ___.",["무거워요","무겁어요","무거어요"],"무거워요","무겁다 → 무거워요로 바뀌어요.")]
@@ -3203,7 +3746,7 @@ def render_unit8_grammar2():
     )
     question = "지금 날씨가 어때요?" if subject == "날씨" else "이 가방이 어때요?"
     degree = "좀" if subject == "날씨" else "아주"
-    st.info(
+    render_learning_info(
         f"가: {question}\n\n나: {degree} :orange[**{state}**].",
         icon=":material/forum:",
     )
@@ -3217,14 +3760,14 @@ def render_unit8_activity1():
     render_unit6_reference("unit8-seoul-busan.png", "unit8-activity1-guide", "<p><b>민호:</b> 지은 씨, 잘 지내요? 부산은 날씨가 더워요?</p><p><b>지은:</b> 네. 잘 지내요. 부산은 정말 더워요. 서울은 어때요?</p><p><b>민호:</b> 서울은 안 더워요. 요즘 비가 자주 와요.</p><p><b>지은:</b> 그래요? 부산은 비가 안 와요.</p>")
     first=render_choice_set(8,"activity1_weather",[("민호 씨는 지금 어디에 있어요?",["서울","부산","제주도"],"서울","그림의 왼쪽은 서울이에요."),("서울의 날씨는 어때요?",["비가 자주 와요.","정말 더워요.","눈이 와요."],"비가 자주 와요.","서울은 비가 오는 장면이에요.")])
     st.markdown("### 2. 지역과 날씨를 선택해 대화를 완성하고 소리 내어 읽어 보세요.")
-    st.info(
+    render_learning_info(
         "**예**\n\n가: 서울은 날씨가 어때요?\n\n나: 서울은 :orange[**비가 자주 와요**].",
         icon=":material/lightbulb:",
     )
     region = st.selectbox("지역",["서울","부산","하와이","시드니"],key="unit8_a1_city")
     weather = st.selectbox("날씨",["비가 자주 와요","더워요","안 추워요","쌀쌀해요","추워요"],key="unit8_a1_weather")
     region_topic = "은" if subject_particle(region) == "이" else "는"
-    st.info(
+    render_learning_info(
         f"가: {region}{region_topic} 날씨가 어때요?\n\n나: {region}{region_topic} :orange[**{weather}**].",
         icon=":material/forum:",
     )
@@ -3246,7 +3789,7 @@ def render_unit8_activity2():
     )
     first=render_choice_set(8,"activity2_jeju",[("제주도의 봄은 어때요?",["따뜻해요","추워요","더워요"],"따뜻해요","봄은 따뜻해요."),("제주도의 여름은 어때요?",["더워요","쌀쌀해요","추워요"],"더워요","여름은 더워요."),("제주도의 가을은 어때요?",["시원해요","더워요","추워요"],"시원해요","가을은 시원해요."),("제주도의 겨울은 어때요?",["추워요","시원해요","따뜻해요"],"추워요","겨울은 추워요.")])
     st.markdown("### 2. 고향을 입력하고 계절과 날씨를 선택해 소개 문장을 완성한 뒤 소리 내어 읽어 보세요.")
-    st.info(
+    render_learning_info(
         "**예**\n\n제 고향은 부산이에요. 여름은 :orange[**더워요**].",
         icon=":material/lightbulb:",
     )
@@ -3261,7 +3804,7 @@ def render_unit8_activity2():
     place_ending = "이에요" if place_name and subject_particle(place_name) == "이" else "예요"
     response=f"제 고향은 {place_name}{place_ending}. {season}은 {weather}." if place_name else ""
     if response:
-        st.success(
+        render_learning_success(
             f"제 고향은 {place_name}{place_ending}. {season}은 :orange[**{weather}**].",
             icon=":material/edit_note:",
         )
@@ -3274,7 +3817,7 @@ def render_unit8_vocabulary_panel(vocabulary_words, active_index, example_senten
     for start in range(0,len(vocabulary_words),5):
         cols=st.columns(min(5,len(vocabulary_words)-start))
         for col,index in zip(cols,range(start,min(start+5,len(vocabulary_words)))):
-            with col: st.button(vocabulary_words[index],key=f"vocab_select_8_{index}",type="primary" if index==active_index else "secondary",on_click=select_vocabulary,args=(8,index),use_container_width=True)
+            with col: st.button(vocabulary_words[index],key=f"vocab_select_8_{index}",type="primary" if index==active_index else "secondary",on_click=select_vocabulary,args=(8,index),width="stretch")
     render_vocabulary_example(example_sentence,color="lime")
     st.divider(); st.markdown("### 2. 한국에는 사계절이 있어요. 계절에 알맞은 날씨 표현을 선택해 보세요.")
     seasons=[("봄",["따뜻해요","추워요","눈이 와요"],"따뜻해요","봄은 따뜻해요."),("여름",["더워요","쌀쌀해요","눈이 와요"],"더워요","여름은 더워요."),("가을",["시원해요","더워요","추워요"],"시원해요","가을은 시원해요."),("겨울",["추워요","따뜻해요","비가 와요"],"추워요","겨울은 추워요.")]
@@ -3307,8 +3850,8 @@ def render_unit9_vocabulary_panel(vocabulary_words, active_index, example_senten
         columns = st.columns(min(5, len(vocabulary_words) - start))
         for column, index in zip(columns, range(start, min(start + 5, len(vocabulary_words)))):
             with column:
-                st.button(vocabulary_words[index], key=f"vocab_select_9_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(9, index), use_container_width=True)
-    st.info(f"**예문:** :green[**{example_sentence}**]", icon=":material/menu_book:")
+                st.button(vocabulary_words[index], key=f"vocab_select_9_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(9, index), width="stretch")
+    render_learning_info(f"**예문:** :green[**{example_sentence}**]", icon=":material/menu_book:")
     st.markdown("### 2. 그림을 보고 장소에 알맞은 지난 활동을 선택해 보세요.")
     visual_places = [
         ("🌳", "공원", "산책하는 곳"),
@@ -3334,7 +3877,7 @@ def render_unit9_vocabulary_panel(vocabulary_words, active_index, example_senten
         ("백화점", ["쇼핑했어요", "공부했어요", "운동했어요"], "쇼핑했어요", "백화점에서 쇼핑했어요."),
     ])
     st.markdown("### 3. 예를 읽고 빈칸에 알맞은 표현을 선택해 대화를 완성해 보세요.")
-    st.info(
+    render_learning_info(
         "**예**\n\n가: 어제 어디에서 뭐 했어요?\n\n"
         "나: 도서관:orange[**에서**] 공부:orange[**했어요**].",
         icon=":material/chat:",
@@ -3364,7 +3907,7 @@ def render_unit9_vocabulary_panel(vocabulary_words, active_index, example_senten
 
 
 def render_unit9_grammar1():
-    st.info("행동이 일어난 장소 뒤에 ‘에서’를 붙여요.", icon=":material/school:")
+    render_learning_info("행동이 일어난 장소 뒤에 ‘에서’를 붙여요.", icon=":material/school:")
     render_unit6_reference(
         "unit9-weekend-activities.png", "unit9-grammar1-guide",
         "<p><b>가:</b> 어제 어디에서 산책했어요?</p><p><b>나:</b> 공원<b style='color:#78aef8'>에서</b> 산책했어요.</p>"
@@ -3394,7 +3937,7 @@ def render_unit9_grammar1():
                     f"<div style='text-align:center;margin-top:13px;font-weight:800'>{place}<span style='color:#78aef8'>에서</span> {action}</div>",
                     unsafe_allow_html=True,
                 )
-    st.info("**예**\n\n가: 어제 어디에서 산책했어요?\n\n나: 공원:orange[**에서**] 산책했어요.", icon=":material/chat:")
+    render_learning_info("**예**\n\n가: 어제 어디에서 산책했어요?\n\n나: 공원:orange[**에서**] 산책했어요.", icon=":material/chat:")
 
     st.markdown("### 2. 장소와 활동을 선택해 대화를 완성하고 소리 내어 읽어 보세요.")
     place_symbols = {"공원": "🌳", "도서관": "📚", "식당": "🍚", "집": "🏠", "헬스장": "🏋️", "백화점": "🛍️"}
@@ -3415,14 +3958,14 @@ def render_unit9_grammar1():
                 f"<div style='text-align:center;margin-top:14px;font-size:1.05rem;font-weight:850'>{place}<span style='color:#78aef8'>에서</span> {action}</div>",
                 unsafe_allow_html=True,
             )
-    st.info(f"가: 어제 어디에서 무엇을 했어요?\n\n나: {place}:orange[**에서**] {action}", icon=":material/record_voice_over:")
+    render_learning_info(f"가: 어제 어디에서 무엇을 했어요?\n\n나: {place}:orange[**에서**] {action}", icon=":material/record_voice_over:")
     st.caption("① 질문을 읽어요.  ② ‘장소 + 에서’를 말해요.  ③ 선택한 활동으로 대답을 마쳐요.")
     if st.button("2번 대화를 두 번 읽었어요", key="unit9_g1_speaking", type="primary"):
         st.session_state["unit9_grammar1_activities_completed"] = True
 
 
 def render_unit9_grammar2():
-    st.info("어제나 지난 주말에 한 일을 말할 때 동사를 과거형으로 바꿔요.", icon=":material/school:")
+    render_learning_info("어제나 지난 주말에 한 일을 말할 때 동사를 과거형으로 바꿔요.", icon=":material/school:")
     render_unit6_reference(
         "unit9-weekend-activities.png", "unit9-grammar2-guide",
         "<p><b>산책해요</b> → <b style='color:#78aef8'>산책했어요</b></p><p><b>공부해요</b> → <b style='color:#78aef8'>공부했어요</b></p>"
@@ -3447,7 +3990,7 @@ def render_unit9_grammar2():
                     f"<div style='text-align:center;margin-top:13px;font-weight:750'>{example}</div>",
                     unsafe_allow_html=True,
                 )
-    st.info(
+    render_learning_info(
         "**예**  오늘 공원에서 산책해요. → 어제 공원에서 :orange[**산책했어요**].",
         icon=":material/timeline:",
     )
@@ -3477,7 +4020,7 @@ def render_unit9_grammar2():
                 "</div>",
                 unsafe_allow_html=True,
             )
-    st.info(f"어제 :orange[**{past_forms[present]}**]", icon=":material/history:")
+    render_learning_info(f"어제 :orange[**{past_forms[present]}**]", icon=":material/history:")
     st.caption("‘오늘’ 문장과 ‘어제’ 문장을 번갈아 읽으며 달라진 부분을 확인하세요.")
     if st.button("2번 문장을 두 번 읽었어요", key="unit9_g2_speaking", type="primary"):
         st.session_state["unit9_g2_speaking_done"] = True
@@ -3536,7 +4079,7 @@ def render_unit9_activity1():
                 f"<div style='text-align:center;margin-top:14px;font-weight:850'>어제 {place}<span style='color:#78aef8'>에서</span> {action}</div>",
                 unsafe_allow_html=True,
             )
-    st.info(
+    render_learning_info(
         f"가: 어제 어디:orange[**에**] 갔어요?\n\n"
         f"나: {place}:orange[**에**] 갔어요.\n\n"
         f"가: {place}:orange[**에서**] 뭐 했어요?\n\n"
@@ -3615,9 +4158,9 @@ def render_unit9_activity2():
         unsafe_allow_html=True,
     )
     response = f"어제는 {day}이었어요.\n{time1}에는 {place1}에서 {action1}.\n{time2}에는 {place2}에서 {action2}.\n{feeling}."
-    st.success(response, icon=":material/edit_note:")
+    render_learning_success(response, icon=":material/edit_note:")
     if place1 == place2 or time1 == time2:
-        st.warning("서로 다른 시간과 장소를 선택하면 시간의 흐름이 잘 보이는 기록을 완성할 수 있어요.", icon=":material/lightbulb:")
+        render_learning_warning("서로 다른 시간과 장소를 선택하면 시간의 흐름이 잘 보이는 기록을 완성할 수 있어요.", icon=":material/lightbulb:")
         return ""
     st.caption("타임라인을 왼쪽에서 오른쪽으로 보고, 마지막 느낌까지 네 문장을 이어서 읽어 보세요.")
     return response if first else ""
@@ -3643,8 +4186,8 @@ def render_unit10_vocabulary_panel(vocabulary_words, active_index, example_sente
         columns = st.columns(min(5, len(vocabulary_words) - start))
         for column, index in zip(columns, range(start, min(start + 5, len(vocabulary_words)))):
             with column:
-                st.button(vocabulary_words[index], key=f"vocab_select_10_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(10, index), use_container_width=True)
-    st.info(f"**예문:** :green[**{example_sentence}**]", icon=":material/menu_book:")
+                st.button(vocabulary_words[index], key=f"vocab_select_10_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(10, index), width="stretch")
+    render_learning_info(f"**예문:** :green[**{example_sentence}**]", icon=":material/menu_book:")
     st.markdown("### 2. 장소 그림에 알맞은 목적을 선택해 보세요.")
     cards = [("🎬", "영화관"), ("🍚", "식당"), ("🌳", "공원"), ("📚", "도서관")]
     columns = st.columns(4, gap="medium")
@@ -3659,7 +4202,7 @@ def render_unit10_vocabulary_panel(vocabulary_words, active_index, example_sente
         ("도서관", ["공부하러 가요", "커피를 마시러 가요", "밥을 먹으러 가요"], "공부하러 가요", "도서관에는 공부하러 가요."),
     ])
     st.markdown("### 3. 예를 읽고 주말 약속 대화를 완성해 보세요.")
-    st.info("**예**\n\n가: 주말에 같이 영화를 :orange[**볼까요?**]\n\n나: 좋아요. 영화관에 영화를 :orange[**보러 가요.**]", icon=":material/chat:")
+    render_learning_info("**예**\n\n가: 주말에 같이 영화를 :orange[**볼까요?**]\n\n나: 좋아요. 영화관에 영화를 :orange[**보러 가요.**]", icon=":material/chat:")
     third = render_choice_set(10, "vocab_plan_dialogue", [
         ("가: 토요일에 같이 놀이공원에 ___?", ["갈까요", "갔어요", "가러 가요"], "갈까요", "함께 가자고 제안하므로 ‘갈까요?’가 알맞아요."),
         ("가: 영화관에 왜 가요?\n나: 영화를 ___ 가요.", ["보러", "볼까요", "봤어요"], "보러", "영화를 보는 목적이므로 ‘보러 가요’를 사용해요."),
@@ -3669,7 +4212,7 @@ def render_unit10_vocabulary_panel(vocabulary_words, active_index, example_sente
 
 
 def render_unit10_grammar1():
-    st.info("상대방에게 함께할 일을 제안할 때 ‘-(으)ㄹ까요?’를 사용해요.", icon=":material/school:")
+    render_learning_info("상대방에게 함께할 일을 제안할 때 ‘-(으)ㄹ까요?’를 사용해요.", icon=":material/school:")
     render_unit6_reference(
         "unit10-weekend-plans.png", "unit10-grammar1-guide",
         "<p><b>가:</b> 주말에 같이 놀이공원에 <b style='color:#78aef8'>갈까요?</b></p><p><b>나:</b> 네, 좋아요.</p>"
@@ -3698,7 +4241,7 @@ def render_unit10_grammar1():
         with st.container(border=True, height=174):
             st.markdown("<div style='text-align:center;font-size:2.4rem'>💌</div><div style='text-align:center;color:#aebbd0;margin-top:5px'>나의 주말 제안</div>", unsafe_allow_html=True)
             st.markdown(f"<div style='text-align:center;font-size:1.12rem;font-weight:850;margin-top:14px'>{day}에 같이 <span style='color:#f2a65a'>{suggestion_forms[base]}</span></div>", unsafe_allow_html=True)
-    st.info(f"가: {day}에 같이 :orange[**{suggestion_forms[base]}**]\n\n나: 네, 좋아요!", icon=":material/forum:")
+    render_learning_info(f"가: {day}에 같이 :orange[**{suggestion_forms[base]}**]\n\n나: 네, 좋아요!", icon=":material/forum:")
     if st.button("2번 대화를 두 번 읽었어요", key="unit10_g1_speaking", type="primary"):
         st.session_state["unit10_g1_speaking_done"] = True
     if first and st.session_state.get("unit10_g1_speaking_done", False):
@@ -3706,7 +4249,7 @@ def render_unit10_grammar1():
 
 
 def render_unit10_grammar2():
-    st.info("어디에 가는 목적을 말할 때 ‘-(으)러 가요’를 사용해요.", icon=":material/school:")
+    render_learning_info("어디에 가는 목적을 말할 때 ‘-(으)러 가요’를 사용해요.", icon=":material/school:")
     render_unit6_reference(
         "unit10-weekend-plans.png", "unit10-grammar2-guide",
         "<p><b>가:</b> 영화관에 왜 가요?</p><p><b>나:</b> 영화를 <b style='color:#78aef8'>보러 가요.</b></p>"
@@ -3742,7 +4285,7 @@ def render_unit10_grammar2():
     with right:
         with st.container(border=True, height=174):
             st.markdown(f"<div style='display:flex;align-items:center;justify-content:center;gap:20px;margin-top:15px'><div style='text-align:center'><div style='font-size:2.6rem'>🚶</div><b>출발</b></div><div style='color:#78aef8;font-size:1.8rem'>→</div><div style='text-align:center'><div style='font-size:2.6rem'>{symbols[destination]}</div><b>{destination}</b></div></div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:14px'>{purpose}</div>", unsafe_allow_html=True)
-    st.info(f"저는 {destination}:orange[**에**] {purpose[:-2]} :orange[**가요.**]", icon=":material/directions_walk:")
+    render_learning_info(f"저는 {destination}:orange[**에**] {purpose[:-2]} :orange[**가요.**]", icon=":material/directions_walk:")
     if st.button("2번 문장을 두 번 읽었어요", key="unit10_g2_speaking", type="primary"):
         st.session_state["unit10_g2_speaking_done"] = True
     if first and st.session_state.get("unit10_g2_speaking_done", False):
@@ -3773,9 +4316,9 @@ def render_unit10_activity1():
         reaction_symbol = "😊" if reaction == "네, 좋아요!" else "🙏"
         st.markdown(f"<div style='text-align:center;font-size:2.3rem'>{reaction_symbol}</div><div style='text-align:center;color:#aebbd0'>나의 대답</div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:8px'>{reaction}</div>", unsafe_allow_html=True)
     if reaction == "네, 좋아요!":
-        st.info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction} 몇 시에 만날까요?\n\n가: {time}에 만나요.", icon=":material/event_available:")
+        render_learning_info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction} 몇 시에 만날까요?\n\n가: {time}에 만나요.", icon=":material/event_available:")
     else:
-        st.info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction}\n\n가: 네, 다음에 같이 가요.", icon=":material/event_busy:")
+        render_learning_info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction}\n\n가: 네, 다음에 같이 가요.", icon=":material/event_busy:")
     if st.button("2번 대화를 두 번 읽었어요", key="unit10_a1_speaking", type="primary"):
         st.session_state["unit10_a1_speaking_done"] = True
     if first and st.session_state.get("unit10_a1_speaking_done", False):
@@ -3805,7 +4348,7 @@ def render_unit10_activity2():
     with st.container(border=True):
         st.markdown(f"<div style='text-align:center;font-size:2.7rem'>{symbols[place]}</div><div style='text-align:center;color:#78aef8;font-weight:850'>MY WEEKEND PLAN</div><div style='display:flex;justify-content:center;gap:28px;margin-top:12px'><b>📅 {day}</b><b>🕒 {time}</b><b>📍 {meeting_point}</b></div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:14px'>🎯 {purpose}</div>", unsafe_allow_html=True)
     response = f"{day}에 같이 {place}에 갈까요?\n좋아요. {place}에 {purpose}\n{time}에 {meeting_point}에서 만나요."
-    st.success(response, icon=":material/calendar_month:")
+    render_learning_success(response, icon=":material/calendar_month:")
     st.caption("약속 카드를 보고 세 문장을 자연스럽게 이어서 읽어 보세요.")
     return response if first else ""
 
@@ -3817,12 +4360,12 @@ def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_senten
         columns = st.columns(min(5, len(vocabulary_words)-start))
         for col, index in zip(columns, range(start, min(start+5, len(vocabulary_words)))):
             with col:
-                st.button(vocabulary_words[index], key=f"vocab_select_7_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(7,index), use_container_width=True)
+                st.button(vocabulary_words[index], key=f"vocab_select_7_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(7,index), width="stretch")
     render_vocabulary_example(example_sentence, color="lime")
     st.markdown("### 예시문을 소리 내어 읽어 보세요.")
     st.dataframe(
         [{"어휘": word, "예시문": VOCABULARY_EXAMPLES.get(7, {}).get(word, f"{word}을/를 사용해 보세요.")} for word in vocabulary_words],
-        hide_index=True, use_container_width=True,
+        hide_index=True, width="stretch",
     )
     st.divider(); st.markdown("### 2. 빈칸에 들어갈 요일을 선택해 보세요.")
     q = [("월요일 다음은 ___이에요.",["화요일","수요일","일요일"],"화요일","월요일 다음 날은 화요일이에요."),("금요일 다음은 ___이에요.",["토요일","목요일","월요일"],"토요일","금요일 다음 날은 토요일이에요."),("오늘이 수요일이면 내일은 ___이에요.",["목요일","화요일","금요일"],"목요일","수요일 다음 날은 목요일이에요.")]
@@ -3846,26 +4389,26 @@ def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_senten
 
 
 def render_unit7_grammar1():
-    st.info("시간이나 날짜 뒤에 ‘에’를 붙여 언제 하는 일인지 말해요.", icon=":material/school:")
+    render_learning_info("시간이나 날짜 뒤에 ‘에’를 붙여 언제 하는 일인지 말해요.", icon=":material/school:")
     render_unit6_reference("unit7-calendar.png","unit7-grammar1-guide","<p><b>형태:</b> <b style='color:#b7ef58'>시간/날짜 + 에</b></p><p>수업은 일곱 시에 시작해요.</p><p>수요일에 한국어 수업이 있어요.</p>")
     st.markdown("### 1. 그림을 보고 대화를 완성해 보세요.")
     qs=[("수업은 일곱 시__ 시작해요.",["에","에서","을"],"에","시간 뒤에는 ‘에’를 사용해요."),("수요일__ 친구를 만나요.",["에","에서","를"],"에","요일 뒤에도 ‘에’를 사용해요."),("3월 5일__ 생일이에요.",["에","은","을"],"에","날짜 뒤에는 ‘에’를 사용해요."),("금요일__ 영화가 있어요.",["에","를","에서"],"에","요일 뒤에는 ‘에’가 와요.")]
     first=render_choice_set(7,"grammar1_time",qs)
     st.markdown("### 2. 요일과 시간을 선택해 대화를 완성하고 소리 내어 읽어 보세요.")
     day=st.selectbox("요일",["월요일","화요일","수요일","목요일","금요일"],key="unit7_g1_day"); hour=st.selectbox("시간",["아홉 시","열 시","일곱 시"],key="unit7_g1_hour")
-    st.info(f"가: 언제 만나요?\n\n나: {day} {hour}에 만나요.",icon=":material/forum:")
+    render_learning_info(f"가: 언제 만나요?\n\n나: {day} {hour}에 만나요.",icon=":material/forum:")
     if st.button("2번 대화를 두 번 읽었어요",key="unit7_g1_speaking",type="primary"): st.session_state["unit7_g1_speaking_done"]=True
     if first and st.session_state.get("unit7_g1_speaking_done",False): st.session_state["unit7_grammar1_activities_completed"]=True
 
 
 def render_unit7_grammar2():
-    st.info("시간을 물을 때 ‘몇 시예요?’라고 말하고, 시와 분을 함께 대답해요.",icon=":material/school:")
+    render_learning_info("시간을 물을 때 ‘몇 시예요?’라고 말하고, 시와 분을 함께 대답해요.",icon=":material/school:")
     render_unit6_reference("unit7-time-lunch.png","unit7-grammar2-guide","<p><b>가:</b> 지금 몇 시예요?</p><p><b>나:</b> 일곱 시 삼십 분이에요.</p><p><b>가:</b> 언제 점심을 먹어요?</p><p><b>나:</b> 열두 시에 점심을 먹어요.</p>")
     st.markdown("### 1. 알맞은 시간 표현을 선택해 보세요.")
     a=render_choice_set(7,"grammar2_clock",[("지금 몇 ___예요?",["시","명","월"],"시","시간을 물을 때는 ‘몇 시예요?’라고 해요."),("일곱 시 삼십 ___이에요.",["분","일","월"],"분","분은 시각의 분을 나타내요."),("수업은 아홉 ___에 시작해요.",["시","분","요일"],"시","시 뒤에 ‘에’를 붙여요.")])
     st.markdown("### 2. 오늘의 일정을 말해 보세요.")
     event=st.selectbox("활동",["한국어 수업","친구 만나기","점심 먹기","운동하기"],key="unit7_g2_event"); t=st.selectbox("시간",["아홉 시","열두 시","세 시"],key="unit7_g2_time")
-    st.info(f"오늘 {t}에 {event}를 해요.",icon=":material/forum:")
+    render_learning_info(f"오늘 {t}에 {event}를 해요.",icon=":material/forum:")
     if st.button("2번 문장을 소리 내어 읽었어요",key="unit7_g2_speaking",type="primary"): st.session_state["unit7_g2_speaking_done"]=True
     if a and st.session_state.get("unit7_g2_speaking_done",False): st.session_state["grammar2_done_7"]=True
 
@@ -3874,7 +4417,7 @@ def render_unit7_activity1():
     st.subheader("활동 1 · 세종학당 수업"); st.markdown("### 1. 재민 씨와 안나 씨가 세종학당 수업 이야기를 해요. 무슨 이야기를 할까요?")
     render_unit6_reference("unit7-classroom-calendar.png","unit7-activity1-guide","<p><b>재민:</b> 안나 씨, 언제 세종학당에 가요?</p><p><b>안나:</b> 목요일에 가요.</p><p><b>재민:</b> 수업은 몇 시에 시작해요?</p><p><b>안나:</b> 저녁 일곱 시에 시작해요.</p>")
     done=render_choice_set(7,"activity1_schedule",[("안나 씨는 언제 세종학당에 가요?",["목요일","금요일","일요일"],"목요일","요일을 확인해요."),("수업은 몇 시에 시작해요?",["저녁 일곱 시","아침 아홉 시","열두 시"],"저녁 일곱 시","대화에서 시간을 찾아요.")])
-    st.markdown("### 2. 언제, 몇 시에 수업을 해요?"); day=st.selectbox("요일",["월요일","수요일","목요일","금요일"],key="unit7_a1_day"); tm=st.selectbox("시간",["아침 아홉 시","오후 세 시","저녁 일곱 시"],key="unit7_a1_time"); st.info(f"{day} {tm}에 수업을 해요.",icon=":material/record_voice_over:")
+    st.markdown("### 2. 언제, 몇 시에 수업을 해요?"); day=st.selectbox("요일",["월요일","수요일","목요일","금요일"],key="unit7_a1_day"); tm=st.selectbox("시간",["아침 아홉 시","오후 세 시","저녁 일곱 시"],key="unit7_a1_time"); render_learning_info(f"{day} {tm}에 수업을 해요.",icon=":material/record_voice_over:")
     if st.button("2번 대화를 두 번 읽었어요",key="unit7_a1_speaking",type="primary"): st.session_state["unit7_a1_speaking_done"]=True
     if done and st.session_state.get("unit7_a1_speaking_done",False): st.session_state["activity1_completed_7"]=True
 
@@ -3890,7 +4433,7 @@ def render_unit7_activity2():
         with c[1]: act=st.selectbox(f"{i+1}번째 활동",["선택하세요","아침을 먹어요","한국어를 공부해요","친구를 만나요","운동해요"],key=f"unit7_a2_act_{i}")
         rows.append((tm,act))
     ready=all(t!="선택하세요" and a!="선택하세요" for t,a in rows); response="" if not ready else " ".join(f"{t}에 {a}." for t,a in rows)
-    if response: st.success(response,icon=":material/edit_note:")
+    if response: render_learning_success(response,icon=":material/edit_note:")
     return response if reading and ready else ""
 
 
@@ -3913,19 +4456,11 @@ def select_vocabulary_category(unit_number, category):
 
 
 def render_vocabulary_example(sentence, color="lime"):
-    """Highlight the two beginner copula endings without changing the example text."""
-    escaped = html.escape(str(sentence))
-    highlighted = re.sub(
-        r"(이에요|예요)",
-        lambda match: (
-            '<span class="ending-ieyo">이에요</span>'
-            if match.group(1) == "이에요"
-            else '<span class="ending-yeyo">예요</span>'
-        ),
-        escaped,
-    )
+    """Highlight only the current unit's target forms inside a vocabulary example."""
+    unit_number = st.session_state.get("selected_unit_number", 1)
+    highlighted = highlight_learning_text(sentence, unit_number)
     st.markdown(
-        f'<div class="vocabulary-example {"coral-example" if color == "coral" else "lime-example"}">{highlighted}</div>',
+        f'<div class="vocabulary-example">{highlighted}</div>',
         unsafe_allow_html=True,
     )
 
@@ -3979,14 +4514,14 @@ def render_unit1_picture_dialogue():
             if st.button("대답 확인", key=f"unit1_picture_check_{card_index}", type="primary"):
                 st.session_state[result_key] = choice == card["answer"]
             if st.session_state.get(result_key) is True:
-                st.success("맞아요! 완성한 문장을 소리 내어 읽어 보세요.", icon=":material/check_circle:")
+                render_learning_success("맞아요! 완성한 문장을 소리 내어 읽어 보세요.", icon=":material/check_circle:")
                 render_vocabulary_example(card["answer"])
                 if st.button("다음 인물 →", key=f"unit1_picture_next_{card_index}"):
                     st.session_state[index_key] = card_index + 1
                     st.session_state.pop(result_key, None)
                     st.rerun()
             elif st.session_state.get(result_key) is False:
-                st.warning(card["hint"], icon=":material/lightbulb:")
+                render_learning_warning(card["hint"], icon=":material/lightbulb:")
         else:
             mystery_country = st.selectbox("나라 선택", ["캐나다", "베트남", "미국", "프랑스", "태국", "인도네시아", "중국", "일본", "러시아", "케냐"], key="unit1_mystery_country")
             mystery_job = st.selectbox("직업 선택", ["회사원", "대학생", "의사", "경찰", "선생님", "가수", "요리사"], key="unit1_mystery_job")
@@ -3996,7 +4531,7 @@ def render_unit1_picture_dialogue():
             if st.button("대화 완성", key="unit1_picture_finish", type="primary"):
                 st.session_state.unit1_picture_dialogue_done = True
             if st.session_state.get("unit1_picture_dialogue_done"):
-                st.success("네 장의 인물카드 대화를 모두 완성했어요!", icon=":material/celebration:")
+                render_learning_success("네 장의 인물카드 대화를 모두 완성했어요!", icon=":material/celebration:")
                 if st.button("처음부터 다시 하기", key="unit1_picture_reset"):
                     st.session_state[index_key] = 0
                     st.session_state.pop(result_key, None)
@@ -4017,36 +4552,46 @@ def dashboard():
     unit_name = current_unit["title"]
     current_vocabulary = TEXTBOOK_VOCABULARY[current_unit["number"]]
     vocab_done = st.session_state.get(f"vocab_done_{current_unit['number']}", False)
+    goal_support = UNIT_GOALS_EN[current_unit["number"]] if english_support_enabled() else current_unit["goal"]
+    unit_heading = (
+        f'Ready to <span class="lime">start Unit {current_unit["number"]}?</span>'
+        if english_support_enabled()
+        else f'{current_unit["number"]}단원 학습을 <span class="lime">시작해 볼까요?</span>'
+    )
+    st.markdown(
+        f'<div class="eyebrow">Unit learning · {book} · {current_unit["number"]}단원</div>'
+        f'<h1>{unit_heading}</h1>'
+        f'<p class="sub">{goal_support}</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
     render_unit_learning_order(current_unit)
-    unit_progress = 0.18 if not st.session_state.get("practice_completed") else 0.42
-    grammar_mastery = min(0.95, 0.36 + st.session_state.get("practice_correct", 0) * 0.08)
-    speaking_mastery = 0.28 if not st.session_state.get("pronunciation_result") else 0.55
-    vocabulary_mastery = 0.48
+    if REVIEW_MODE:
+        render_learning_info(
+            "현재 점검 모드입니다. 1~5단계를 자유롭게 이동할 수 있지만, 완료 표시와 진행률은 실제 완료 결과만 반영합니다.",
+            icon=":material/visibility:",
+        )
+    completion_steps = get_unit_completion_steps(current_unit["number"])
+    unit_progress = sum(completion_steps) / len(completion_steps)
+    vocabulary_mastery = 1.0 if completion_steps[0] else 0.0
+    grammar_mastery = (int(completion_steps[1]) + int(completion_steps[2])) / 2
+    speaking_mastery = (int(completion_steps[3]) + int(completion_steps[4])) / 2
     total_xp = st.session_state.get("total_xp", 0)
     streak = st.session_state.get("streak", 1)
-    with st.container(border=True):
+    with st.expander("학습 현황과 다음 추천 보기", expanded=False):
         render_motivation_header(unit_progress, total_xp, streak, sum(st.session_state.daily_tasks.values()))
         st.markdown("### 나에게 맞는 다음 한 걸음")
         if not st.session_state.get("practice_completed"):
-            st.info("지금은 문법 연습이 가장 효과적이에요. 조사 한 문제를 풀고 오늘의 흐름을 이어 가 보세요.", icon=":material/lightbulb:")
+            render_learning_info("지금은 문법 연습이 가장 효과적이에요. 조사 한 문제를 풀고 오늘의 흐름을 이어 가 보세요.", icon=":material/lightbulb:")
         elif not st.session_state.get("pronunciation_result"):
-            st.info("문법을 잘 풀었어요. 이제 방금 배운 표현을 소리 내어 말하면 기억이 더 오래 남습니다.", icon=":material/record_voice_over:")
+            render_learning_info("문법을 잘 풀었어요. 이제 방금 배운 표현을 소리 내어 말하면 기억이 더 오래 남습니다.", icon=":material/record_voice_over:")
         else:
-            st.success("오늘의 핵심 흐름을 완료했어요. 다음에는 나만의 문장으로 레벨업해 보세요.", icon=":material/celebration:")
-    st.space("large")
-    st.markdown(f'<div class="eyebrow">Learner home · {book} · {level}</div><h1>오늘의 학습을 <span class="lime">가볍게 시작해요.</span></h1><p class="sub">교재 진도와 실제 실력 상태를 따로 확인하면서, 매일 10분씩 한 단원씩 쌓아 갑니다.</p>', unsafe_allow_html=True)
-    st.markdown("<br>", unsafe_allow_html=True)
-    a, b, c = st.columns(3)
-    with a: metric("TEXTBOOK PROGRESS", f"{book}", f"{unit_index + 1}단원 · {unit_name}", "lime")
-    with b: metric("MY SKILL LEVEL", level, "진단·학습 기록 기반")
-    with c: metric("WEEKLY GOAL", f"{completed_days} / 6일", "이번 주 학습 완료")
-    st.markdown("<br>", unsafe_allow_html=True)
+            render_learning_success("오늘의 핵심 흐름을 완료했어요. 다음에는 나만의 문장으로 레벨업해 보세요.", icon=":material/celebration:")
+    st.space("small")
     left, right = st.columns([1.25, 1])
     with left:
         st.markdown(f'<div class="card"><div class="eyebrow">Textbook path · {book} · {TEXTBOOK_EDITION}</div><h2>{current_unit["number"]}단원 · {unit_name}</h2><p class="sub">{current_unit["goal"]}</p><div class="progress"><div style="width:{int(unit_progress * 100)}%"></div></div><div style="display:flex;justify-content:space-between"><span class="tiny">단원 진행률</span><span class="tiny lime">{int(unit_progress * 100)}%</span></div><div class="lesson-row"><span>핵심 기능</span><b>{current_unit["functions"]}</b></div><div class="lesson-row"><span>문법</span><b>{current_unit["grammar"]}</b></div><div class="lesson-row"><span>교재 매핑</span><b class="lime">공식 목차 기준</b></div></div>', unsafe_allow_html=True)
-        if st.button("단원 학습 계속하기  →", type="primary", key="continue_unit", use_container_width=True):
-            st.session_state.go_practice = True
-            st.rerun()
+        st.caption("아래의 1~5단계 탭에서 현재 학습 단계를 선택하세요.")
     with right:
         st.markdown('<div class="card"><div class="eyebrow">Skill snapshot</div><h2>실력 상태</h2><p class="tiny">교재 진도와 별도로 계산되는 개인별 상태입니다.</p>', unsafe_allow_html=True)
         for label, value in [("어휘", vocabulary_mastery), ("문법", grammar_mastery), ("말하기", speaking_mastery)]:
@@ -4055,7 +4600,7 @@ def dashboard():
     st.markdown("<br>", unsafe_allow_html=True)
     section = LESSON_SECTION_CONTENT[current_unit["number"]]
     if current_unit["number"] == 1:
-        st.info("단원 도입: 먼저 대화 모델을 3회 읽어 보세요.", icon=":material/play_circle:")
+        render_learning_info("단원 도입: 먼저 대화 모델을 3회 읽어 보세요.", icon=":material/play_circle:")
         st.caption("상황과 핵심 문장을 먼저 살펴본 뒤, 아래의 1단계 어휘와 표현으로 이어집니다.")
         st.markdown("### 단원 도입 · 대화 모델 3회 읽기")
         st.caption("자기소개 흐름에 따라 인사 → 이름 → 나라 → 직업 순서로 말해 보세요.")
@@ -4099,47 +4644,23 @@ def dashboard():
                             st.session_state[line_key] += 1
                         st.rerun()
                 else:
-                    st.success("대화 3회 읽기를 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success("대화 3회 읽기를 완료했어요.", icon=":material/check_circle:")
                     st.markdown("<div class='learning-hint'>읽기 단계가 끝났습니다. 오른쪽에서 이름·나라·직업을 바꿔 자기소개를 완성하세요.</div>", unsafe_allow_html=True)
         with profile:
             with st.container(border=True):
-                st.markdown("**나의 자기소개 카드**")
-                self_name = st.text_input("이름", placeholder="예: 마리아", key="unit1_self_name")
-                self_country = st.selectbox("나라", ["한국", "캐나다", "베트남", "미국", "프랑스", "태국", "인도네시아", "중국", "일본", "러시아", "케냐", "브라질"], key="unit1_self_country")
-                self_job = st.selectbox("직업", ["회사원", "대학생", "의사", "경찰", "선생님", "가수", "요리사"], key="unit1_self_job")
-                if st.button("내 소개 완성하기", key="unit1_make_intro", type="primary"):
-                    if self_name.strip():
-                        st.session_state.unit1_intro = f"안녕하세요? 저는 {self_name.strip()}예요. {self_country} 사람이에요. {self_job}이에요."
-                        st.session_state.unit1_intro_done = True
-                        st.success("자기소개를 완성했어요!", icon=":material/check_circle:")
-                    else:
-                        st.warning("먼저 이름을 입력해 주세요.", icon=":material/edit:")
-                if st.session_state.get("unit1_intro"):
-                    st.success(st.session_state.unit1_intro, icon=":material/chat:")
-                    st.markdown("<div class='learning-hint'>완성한 자기소개를 천천히 소리 내어 읽어 보세요. 이름·나라·직업을 바꾸어 2번 더 연습해도 좋아요.</div>", unsafe_allow_html=True)
-                    if st.button("자기소개 다시 작성", key="unit1_intro_reset"):
-                        st.session_state.pop("unit1_intro", None)
-                        st.session_state.unit1_intro_done = False
-                        st.rerun()
-        st.space("medium")
-        st.markdown("### 오늘의 핵심 정리")
-        st.info("문법 학습으로 넘어가기 전에, 오늘 배운 표현을 한 번 더 확인해 보세요.", icon=":material/format_list_bulleted:")
-        summary_cols = st.columns(3)
-        summaries = [
-            ("이에요", "마지막 글자에 받침이 있는 명사 뒤", "학생이에요"),
-            ("예요", "마지막 글자에 받침이 없는 명사 뒤", "안나예요"),
-            ("은/는", "명사를 주제로 말할 때 · 받침이 있으면 은, 없으면 는", "저는 안나예요"),
-        ]
-        for column, (form, rule, example) in zip(summary_cols, summaries):
-            with column:
-                with st.container(border=True):
-                    st.markdown(f"#### {form}")
-                    st.caption(rule)
-                    st.write(example)
+                st.markdown("**단원 도입 · 자기소개 순서**")
+                render_learning_info("인사 → 이름 → 나라 → 직업", icon=":material/format_list_numbered:")
+                st.caption("직접 자기소개를 만드는 활동은 5단계에서 한 번만 진행합니다.")
         st.space("medium")
     if current_unit["number"] in (2, 3, 4):
         st.space("medium")
-    st.markdown(f'<div class="eyebrow">Unit learning path · {current_unit["number"]}단원</div><h2>{current_unit["title"]} 쉽게 익히기</h2><p class="sub lesson-path-copy">어휘와 표현 → 문법 1 → 문법 2 → 활동 1 → 활동 2 순서로 학습합니다.</p>', unsafe_allow_html=True)
+    path_support = (
+        "Vocabulary → Grammar 1 → Grammar 2 → Activity 1 → Activity 2"
+        if english_support_enabled()
+        else "어휘와 표현 → 문법 1 → 문법 2 → 활동 1 → 활동 2 순서로 학습합니다."
+    )
+    path_heading = f'Learn “{current_unit["title"]}”' if english_support_enabled() else f'{current_unit["title"]} 쉽게 익히기'
+    st.markdown(f'<div class="eyebrow">Unit learning path · {current_unit["number"]}단원</div><h2>{path_heading}</h2><p class="sub lesson-path-copy">{path_support}</p>', unsafe_allow_html=True)
     vocab_done = st.session_state.get(f"vocab_done_{current_unit['number']}", False)
     grammar1_done = st.session_state.get(f"grammar1_done_{current_unit['number']}", False)
     grammar2_done = st.session_state.get(f"grammar2_done_{current_unit['number']}", False)
@@ -4164,11 +4685,11 @@ def dashboard():
     elif not activity1_done:
         unit_completed = False
         st.session_state.pop(f"unit_completed_{current_unit['number']}", None)
-    # 개발 중에는 완료 순서와 관계없이 모든 학습 단계를 열어 둡니다.
-    grammar1_unlocked = True
-    grammar2_unlocked = True
-    activity1_unlocked = True
-    activity2_unlocked = True
+    # 점검 모드는 화면 접근만 열고, 완료 판정은 위의 순차 상태를 그대로 사용합니다.
+    grammar1_unlocked = REVIEW_MODE or vocab_done
+    grammar2_unlocked = REVIEW_MODE or grammar1_done
+    activity1_unlocked = REVIEW_MODE or grammar2_done
+    activity2_unlocked = REVIEW_MODE or activity1_done
     step1_done = vocab_done
     completed_steps = [step1_done, grammar1_done, grammar2_done, activity1_done, unit_completed]
     tab_names = ["● 어휘와 표현   ", "● 문법 1   ", "● 문법 2   ", "● 활동 1   ", "● 활동 2"]
@@ -4258,7 +4779,7 @@ def dashboard():
                                 st.rerun()
                             st.markdown(f"<div style='text-align:center;font-size:.84rem'>{reading}</div>", unsafe_allow_html=True)
                 if selected_sino_number:
-                    st.success(f"{selected_sino_number} = {st.session_state.get('unit2_selected_sino_reading')}", icon=":material/volume_up:")
+                    render_learning_success(f"{selected_sino_number} = {st.session_state.get('unit2_selected_sino_reading')}", icon=":material/volume_up:")
                 st.space("small")
                 st.markdown("### 2. 숫자가 들어간 정보를 읽어 보세요.")
                 unit2_number_examples = [
@@ -4289,7 +4810,7 @@ def dashboard():
                                 st.session_state["unit2_selected_number_example_reading"] = reading
                             st.rerun()
                 if selected_number_example:
-                    st.success(
+                    render_learning_success(
                         f"{selected_number_example} = {st.session_state.get('unit2_selected_number_example_reading')}",
                         icon=":material/volume_up:",
                     )
@@ -4302,6 +4823,7 @@ def dashboard():
                     ("가격표", "얼마예요?", ["선택하세요", "500원", "800원", "1,000원"], "800원", "팔백원", "price"),
                     ("방", "몇 호예요?", ["선택하세요", "320호", "405호", "508호"], "405호", "사백오호", "room"),
                 ]
+                unit2_visual_results = []
                 visual_question_columns = st.columns(2)
                 for index, (label, question, options, correct, correct_reading, visual_type) in enumerate(unit2_visual_questions):
                     with visual_question_columns[index % 2]:
@@ -4315,12 +4837,16 @@ def dashboard():
                             else:
                                 st.image(Path(__file__).with_name("assets") / "people" / "room-405-sign.png", width=230)
                             selected_answer = st.selectbox(question, options, key=f"unit2_visual_number_{index}")
+                            unit2_visual_results.append(selected_answer == correct)
                             if selected_answer != "선택하세요":
                                 correct_ending = "이에요" if subject_particle(correct) == "이" else "예요"
                                 if selected_answer == correct:
-                                    st.success(f"가: {question}\n\n나: {correct_reading}{correct_ending}.")
+                                    render_learning_success(f"가: {question}\n\n나: {correct_reading}{correct_ending}.")
                                 else:
-                                    st.warning(f"그림의 숫자를 다시 확인해 보세요. 정답은 {correct_reading}{correct_ending}.")
+                                    render_learning_warning(f"그림의 숫자를 다시 확인해 보세요. 정답은 {correct_reading}{correct_ending}.")
+                unit2_number_tasks_done = all(unit2_visual_results)
+                if unit2_number_tasks_done:
+                    render_learning_success("네 개의 숫자 대화를 모두 정확하게 완성했어요.", icon=":material/check_circle:")
                 st.divider()
             vocabulary_words = [word for word, _ in current_vocabulary]
             vocab_index_key = f"vocab_index_{current_unit['number']}"
@@ -4350,10 +4876,6 @@ def dashboard():
                     line-height:1.8;
                     margin-bottom:18px;
                 }
-                .vocabulary-example.lime-example,
-                .vocabulary-example.lime-example * { color:#b7ef58 !important; }
-                .vocabulary-example.coral-example,
-                .vocabulary-example.coral-example * { color:#ff9a80 !important; }
                 </style>
                 """,
                 unsafe_allow_html=True,
@@ -4414,7 +4936,7 @@ def dashboard():
                         type="primary" if selected_category == "나라" else "secondary",
                         on_click=select_vocabulary_category,
                         args=(current_unit["number"], "나라"),
-                        use_container_width=True,
+                        width="stretch",
                     )
                 with country_example:
                     if selected_category == "나라" or (selected_category is None and active_index < country_count):
@@ -4428,7 +4950,7 @@ def dashboard():
                             type="primary" if selected_category is None and index == active_index else "secondary",
                             on_click=select_vocabulary,
                             args=(current_unit["number"], index),
-                            use_container_width=True,
+                            width="stretch",
                         )
                 st.space("small")
                 st.markdown("### 2. 직업이 뭐예요?")
@@ -4440,7 +4962,7 @@ def dashboard():
                         type="primary" if selected_category == "직업" else "secondary",
                         on_click=select_vocabulary_category,
                         args=(current_unit["number"], "직업"),
-                        use_container_width=True,
+                        width="stretch",
                     )
                 with job_example:
                     if selected_category == "직업" or (selected_category is None and active_index >= country_count):
@@ -4454,7 +4976,7 @@ def dashboard():
                             type="primary" if selected_category is None and index == active_index else "secondary",
                             on_click=select_vocabulary,
                             args=(current_unit["number"], index),
-                            use_container_width=True,
+                            width="stretch",
                         )
             elif current_unit["number"] == 3:
                 render_unit3_vocabulary_panel(
@@ -4499,7 +5021,7 @@ def dashboard():
                             type="primary" if index == active_index else "secondary",
                             on_click=select_vocabulary,
                             args=(current_unit["number"], index),
-                            use_container_width=True,
+                            width="stretch",
                         )
             active_index = st.session_state[vocab_index_key]
             selected_word = vocabulary_words[active_index]
@@ -4514,13 +5036,15 @@ def dashboard():
                     st.session_state[revealed_key] = not revealed
                     st.rerun()
                 if st.session_state.get(revealed_key, False):
-                    st.success(f"{selected_word} = {selected_meaning}")
+                    render_learning_success(f"{selected_word} = {selected_meaning}")
             unit3_dialogue_done = True
             if current_unit["number"] == 3:
                 unit3_dialogue_done = render_unit3_vocabulary_dialogue()
             if current_unit["number"] == 1:
                 st.divider()
                 render_unit1_picture_dialogue()
+            unit1_tasks_done = st.session_state.get("unit1_picture_dialogue_done", False) if current_unit["number"] == 1 else True
+            unit2_tasks_done = unit2_number_tasks_done if current_unit["number"] == 2 else True
             unit4_tasks_done = unit4_vocabulary_tasks_done if current_unit["number"] == 4 else True
             unit5_tasks_done = unit5_vocabulary_tasks_done if current_unit["number"] == 5 else True
             unit6_tasks_done = unit6_vocabulary_tasks_done if current_unit["number"] == 6 else True
@@ -4528,32 +5052,36 @@ def dashboard():
             unit8_tasks_done = unit8_vocabulary_tasks_done if current_unit["number"] == 8 else True
             unit9_tasks_done = unit9_vocabulary_tasks_done if current_unit["number"] == 9 else True
             unit10_tasks_done = unit10_vocabulary_tasks_done if current_unit["number"] == 10 else True
-            vocabulary_stage_ready = all_vocabulary_read and unit3_dialogue_done and unit4_tasks_done and unit5_tasks_done and unit6_tasks_done and unit7_tasks_done and unit8_tasks_done and unit9_tasks_done and unit10_tasks_done
+            vocabulary_stage_ready = all_vocabulary_read and unit1_tasks_done and unit2_tasks_done and unit3_dialogue_done and unit4_tasks_done and unit5_tasks_done and unit6_tasks_done and unit7_tasks_done and unit8_tasks_done and unit9_tasks_done and unit10_tasks_done
             if vocabulary_stage_ready:
                 vocab_done = True
                 st.session_state[f"vocab_done_{current_unit['number']}"] = True
                 if current_unit["number"] == 3:
-                    st.success(f"✓ {len(vocabulary_words)}개 어휘와 그림 대화를 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 어휘와 그림 대화를 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 4:
-                    st.success(f"✓ {len(vocabulary_words)}개 기본 동사와 연결·그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 기본 동사와 연결·그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 5:
-                    st.success(f"✓ {len(vocabulary_words)}개 장소·식품 어휘와 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 장소·식품 어휘와 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 6:
-                    st.success(f"✓ {len(vocabulary_words)}개 고유어 수와 수량 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 고유어 수와 수량 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 7:
-                    st.success(f"✓ {len(vocabulary_words)}개 날짜·요일 어휘와 대화 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 날짜·요일 어휘와 대화 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 8:
-                    st.success(f"✓ {len(vocabulary_words)}개 날씨·계절 어휘와 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 날씨·계절 어휘와 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 9:
-                    st.success(f"✓ {len(vocabulary_words)}개 장소·지난 활동 표현과 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 장소·지난 활동 표현과 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 elif current_unit["number"] == 10:
-                    st.success(f"✓ {len(vocabulary_words)}개 주말 제안·이동 목적 표현과 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 주말 제안·이동 목적 표현과 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
                 else:
-                    st.success(f"✓ {len(vocabulary_words)}개 어휘를 모두 확인했어요.", icon=":material/check_circle:")
+                    render_learning_success(f"✓ {len(vocabulary_words)}개 어휘를 모두 확인했어요.", icon=":material/check_circle:")
             else:
-                if current_unit["number"] in (3, 4, 5, 6, 7, 8, 9, 10):
+                if current_unit["number"] in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
                     st.session_state.pop(f"vocab_done_{current_unit['number']}", None)
                     vocab_done = False
+                    if current_unit["number"] == 1 and all_vocabulary_read and not unit1_tasks_done:
+                        st.caption("마지막으로 네 장의 인물 카드 대화를 완료하면 어휘와 표현 단계가 끝납니다.")
+                    if current_unit["number"] == 2 and all_vocabulary_read and not unit2_tasks_done:
+                        st.caption("마지막으로 네 개의 숫자 대화를 모두 맞히면 어휘와 표현 단계가 끝납니다.")
                     if all_vocabulary_read and not unit3_dialogue_done:
                         st.caption("마지막으로 3번 그림 대화를 모두 맞히면 어휘와 표현 단계가 완료됩니다.")
                     if current_unit["number"] == 4 and all_vocabulary_read and not unit4_tasks_done:
@@ -4624,7 +5152,7 @@ def dashboard():
                             st.session_state[line_key] += 1
                         st.rerun()
                 else:
-                    st.success("대화를 3번 읽었어요! 이제 자기소개를 완성해 보세요.", icon=":material/celebration:")
+                    render_learning_success("대화를 3번 읽었어요! 이제 자기소개를 완성해 보세요.", icon=":material/celebration:")
                     if st.button("다시 3번 읽기", key="unit1_read_reset"):
                         st.session_state[round_key] = 0
                         st.session_state[line_key] = 0
@@ -4644,11 +5172,11 @@ def dashboard():
                         if self_name.strip():
                             st.session_state.unit1_intro = f"안녕하세요? 저는 {self_name.strip()}예요. {self_country} 사람이에요. {self_job}이에요."
                             st.session_state.unit1_intro_done = True
-                            st.success("자기소개를 완성했어요!", icon=":material/check_circle:")
+                            render_learning_success("자기소개를 완성했어요!", icon=":material/check_circle:")
                         else:
-                            st.warning("먼저 이름을 입력해 주세요.", icon=":material/edit:")
+                            render_learning_warning("먼저 이름을 입력해 주세요.", icon=":material/edit:")
                     if st.session_state.get("unit1_intro"):
-                        st.success(st.session_state.unit1_intro, icon=":material/chat:")
+                        render_learning_success(st.session_state.unit1_intro, icon=":material/chat:")
                         st.markdown("<div class='learning-hint'>완성한 자기소개를 천천히 소리 내어 읽어 보세요. 이름·나라·직업을 바꾸어 2번 더 연습해도 좋아요.</div>", unsafe_allow_html=True)
                         if st.button("자기소개 다시 작성", key="unit1_intro_reset"):
                             st.session_state.pop("unit1_intro", None)
@@ -4656,7 +5184,7 @@ def dashboard():
                             st.rerun()
         st.space("medium")
         st.markdown("### 오늘의 핵심 정리")
-        st.info("문법 학습으로 넘어가기 전에, 오늘 배운 표현을 한 번 더 확인해 보세요.", icon=":material/format_list_bulleted:")
+        render_learning_info("문법 학습으로 넘어가기 전에, 오늘 배운 표현을 한 번 더 확인해 보세요.", icon=":material/format_list_bulleted:")
         summary_cols = st.columns(3)
         summaries = [
             ("이에요", "마지막 글자에 받침이 있는 명사 뒤", "학생이에요"),
@@ -4697,37 +5225,37 @@ def dashboard():
                 st.caption("2단계 · 명사 뒤에 붙여 사람이나 사물을 설명해요.")
                 ending_columns = st.columns(2)
                 with ending_columns[0]:
-                    st.info("**받침 있음 → 이에요**\n\n회사원 → 회사원이에요.\n\n책 → 책이에요.", icon=":material/spellcheck:")
+                    render_learning_info("**받침 있음 → 이에요**\n\n회사원 → 회사원이에요.\n\n책 → 책이에요.", icon=":material/spellcheck:")
                 with ending_columns[1]:
-                    st.info("**받침 없음 → 예요**\n\n의사 → 의사예요.\n\n모자 → 모자예요.", icon=":material/spellcheck:")
+                    render_learning_info("**받침 없음 → 예요**\n\n의사 → 의사예요.\n\n모자 → 모자예요.", icon=":material/spellcheck:")
                 st.space("small")
                 st.markdown("**대화로 먼저 익혀 보세요**")
                 dialogue_columns = st.columns(2)
                 with dialogue_columns[0]:
-                    with st.container(border=True, height=250):
-                        office_image, office_dialogue = st.columns([1, 2.7], gap=None, vertical_alignment="center")
+                    with st.container(border=True, height=250, key="unit1_grammar_dialogue_g1_office"):
+                        office_image, office_dialogue = st.columns([1.5, 2.5], gap=None, vertical_alignment="center")
                         with office_image:
-                            st.image(Path(__file__).with_name("assets") / "people" / "office-worker.png", width=130)
+                            render_unit1_study_image("office-worker.png")
                         with office_dialogue:
-                            st.markdown("가: 회사원:orange[이에요]?  \n\n나: 네. 회사원:orange[이에요].")
+                            render_learning_markdown("가: 회사원이에요?  \n\n나: 네. 회사원이에요.")
                 with dialogue_columns[1]:
-                    with st.container(border=True, height=250):
-                        hat_image, hat_dialogue = st.columns([1.25, 2.45], gap=None, vertical_alignment="center")
+                    with st.container(border=True, height=250, key="unit1_grammar_dialogue_g1_hat"):
+                        hat_image, hat_dialogue = st.columns([1.5, 2.5], gap=None, vertical_alignment="center")
                         with hat_image:
-                            st.image(Path(__file__).with_name("assets") / "people" / "hat.png", width=175)
+                            render_unit1_study_image("hat.png")
                         with hat_dialogue:
-                            st.markdown("가: 모자:blue[예요]?  \n\n나: 네. 모자:blue[예요].")
+                            render_learning_markdown("가: 모자예요?  \n\n나: 네. 모자예요.")
                 st.divider()
             if current_unit["number"] == 2:
-                st.info(
+                render_learning_info(
                     "명사 뒤에서 문장의 주어를 나타내요. 받침이 있으면 ‘이’, 없으면 ‘가’를 사용해요.",
                     icon=":material/school:",
                 )
                 particle_columns = st.columns(2)
                 with particle_columns[0]:
-                    st.info("**받침 있음 → 이**\n\n이름 → 이름이 뭐예요?", icon=":material/spellcheck:")
+                    render_learning_info("**받침 있음 → 이**\n\n이름 → 이름이 뭐예요?", icon=":material/spellcheck:")
                 with particle_columns[1]:
-                    st.info("**받침 없음 → 가**\n\n전화번호 → 전화번호가 뭐예요?", icon=":material/spellcheck:")
+                    render_learning_info("**받침 없음 → 가**\n\n전화번호 → 전화번호가 뭐예요?", icon=":material/spellcheck:")
                 st.space("small")
                 st.markdown("**대화로 먼저 익혀 보세요**")
                 unit2_g1_dialogues = st.columns(2)
@@ -4744,7 +5272,7 @@ def dashboard():
                                 width=110,
                             )
                         with dialogue_text:
-                            st.markdown("가: 이름:orange[이] 뭐예요?  \n나: 마리예요.")
+                            render_learning_markdown("가: 이름이 뭐예요?  \n나: 마리예요.")
                 with unit2_g1_dialogues[1]:
                     with st.container(border=True, height=210):
                         dialogue_image, dialogue_text = st.columns([1, 2.2], gap=None, vertical_alignment="center")
@@ -4758,7 +5286,7 @@ def dashboard():
                                 width=110,
                             )
                         with dialogue_text:
-                            st.markdown("가: 전화번호:blue[가] 뭐예요?  \n나: 010-1213-7505예요.")
+                            render_learning_markdown("가: 전화번호가 뭐예요?  \n나: 010-1213-7505예요.")
                 st.space("small")
                 st.markdown("**1. 그림을 보고 질문에 알맞은 대답을 선택해 보세요.**")
                 st.caption("그림 속 사람의 이름과 전화번호를 보고 알맞은 대답을 골라 보세요.")
@@ -4788,9 +5316,9 @@ def dashboard():
                             unit2_g1_picture_answers.append(selected == answer)
                 if st.button("1번 정답 확인", key="unit2_g1_picture_check", type="primary"):
                     if all(unit2_g1_picture_answers):
-                        st.success("네 대화를 모두 정확하게 완성했어요.", icon=":material/check_circle:")
+                        render_learning_success("네 대화를 모두 정확하게 완성했어요.", icon=":material/check_circle:")
                     else:
-                        st.warning(f"{sum(unit2_g1_picture_answers)}/4개가 맞아요. 그림의 이름과 정보를 다시 확인해 보세요.")
+                        render_learning_warning(f"{sum(unit2_g1_picture_answers)}/4개가 맞아요. 그림의 이름과 정보를 다시 확인해 보세요.")
                 st.divider()
             if current_unit["number"] == 3:
                 render_unit3_grammar1_intro()
@@ -4853,14 +5381,14 @@ def dashboard():
                     grammar_rule = GRAMMAR_RULES.get(section["grammar1"], "이 표현은 문장에서 어떤 역할을 하는지 예문과 함께 확인해 보세요.")
                     if grammar_choice == answer:
                         st.session_state[grammar_result_key] = True
-                        st.success(f"정답이에요! ‘{grammar_choice}’가 맞아요.")
-                        st.info(f"왜 정답일까요? {explanation}", icon=":material/lightbulb:")
+                        render_learning_success(f"정답이에요! ‘{grammar_choice}’가 맞아요.")
+                        render_learning_info(f"왜 정답일까요? {explanation}", icon=":material/lightbulb:")
                     else:
                         st.session_state[grammar_result_key] = False
                         completed_sentence = sentence.replace("__", answer)
-                        st.warning("아직 정답이 아니에요. 설명을 읽고 다시 선택해 보세요.")
+                        render_learning_warning("아직 정답이 아니에요. 설명을 읽고 다시 선택해 보세요.")
                         choice_particle = subject_particle(grammar_choice)
-                        st.info(f"왜 ‘{grammar_choice}’{choice_particle} 아닐까요? {explanation}", icon=":material/lightbulb:")
+                        render_learning_info(f"왜 ‘{grammar_choice}’{choice_particle} 아닐까요? {explanation}", icon=":material/lightbulb:")
                         st.markdown(f"**다시 완성해 보세요:** {completed_sentence}")
                     with st.expander("문법 원리 보기", icon=":material/school:"):
                         st.write(grammar_rule)
@@ -4873,7 +5401,7 @@ def dashboard():
                         st.rerun()
                 else:
                     if current_unit["number"] != 1:
-                        st.success("문법 1의 네 문장을 모두 정확하게 풀었어요.", icon=":material/check_circle:")
+                        render_learning_success("문법 1의 네 문장을 모두 정확하게 풀었어요.", icon=":material/check_circle:")
                     if current_unit["number"] == 1:
                         st.divider()
                         st.markdown("### 1. 그림을 보고 대화를 완성해 보세요.")
@@ -4890,9 +5418,9 @@ def dashboard():
                             with st.container(border=True):
                                 picture_column, dialogue_column = st.columns([1, 3], gap="small", vertical_alignment="center")
                                 with picture_column:
-                                    st.image(Path(__file__).with_name("assets") / "people" / image_name, width=145)
+                                    render_unit1_study_image(image_name)
                                     st.markdown(
-                                        f"<div style='width:145px;text-align:right;margin-top:-1.15rem;padding-right:.2rem;box-sizing:border-box;line-height:1;font-size:.9rem;font-weight:750;color:#d9e2ef'>{picture_label}</div>",
+                                        f"<div style='width:180px;text-align:right;margin-top:-1.15rem;padding-right:.2rem;box-sizing:border-box;line-height:1;font-size:.9rem;font-weight:750;color:#d9e2ef'>{picture_label}</div>",
                                         unsafe_allow_html=True,
                                     )
                                 with dialogue_column:
@@ -4915,10 +5443,10 @@ def dashboard():
                                 st.session_state["unit1_grammar1_picture_feedback"] = selected_picture_answers
                                 if all(picture_answers):
                                     st.session_state["unit1_grammar1_picture_passed"] = True
-                                    st.success("네 개의 대화를 모두 정확하게 완성했어요!", icon=":material/check_circle:")
+                                    render_learning_success("네 개의 대화를 모두 정확하게 완성했어요!", icon=":material/check_circle:")
                                 else:
                                     st.session_state["unit1_grammar1_picture_passed"] = False
-                                    st.warning(f"{sum(picture_answers)}/4개가 맞아요. 아래에서 문항별 설명을 확인해 보세요.")
+                                    render_learning_warning(f"{sum(picture_answers)}/4개가 맞아요. 아래에서 문항별 설명을 확인해 보세요.")
                             st.rerun()
                         saved_picture_feedback = st.session_state.get("unit1_grammar1_picture_feedback")
                         if saved_picture_feedback:
@@ -4926,16 +5454,16 @@ def dashboard():
                             for index, (exercise, selected_answer) in enumerate(zip(picture_exercises, saved_picture_feedback)):
                                 picture_label, image_name, question, choices, correct_answer, explanation = exercise
                                 if selected_answer == correct_answer:
-                                    st.success(f"{index + 1}번 · {picture_label}: ‘{selected_answer}’ — 정답이에요. {explanation}")
+                                    render_learning_success(f"{index + 1}번 · {picture_label}: ‘{selected_answer}’ — 정답이에요. {explanation}")
                                 else:
-                                    st.error(f"{index + 1}번 · {picture_label}: 선택한 답은 ‘{selected_answer}’예요. 정답은 ‘{correct_answer}’입니다. {explanation}")
+                                    render_learning_error(f"{index + 1}번 · {picture_label}: 선택한 답은 ‘{selected_answer}’예요. 정답은 ‘{correct_answer}’입니다. {explanation}")
 
                         st.divider()
                         st.markdown("### 2. 사진을 보고 이름과 나라를 입력해 대화를 완성해 보세요.")
                         st.caption("이름과 나라를 선택하면 알맞은 소개 대화가 완성됩니다. 완성된 대화를 소리 내어 읽어 보세요.")
                         friend_photo, friend_form = st.columns([1, 2], vertical_alignment="center")
                         with friend_photo:
-                            st.image(Path(__file__).with_name("assets") / "people" / "vietnam.png", width=210)
+                            render_unit1_study_image("vietnam.png", canvas_size=(220, 220), image_size=(205, 210))
                         with friend_form:
                             exercise_friend_name = st.text_input("친구 이름", placeholder="예: 민", key="unit1_grammar1_friend_name")
                             exercise_friend_country = st.selectbox(
@@ -4945,7 +5473,7 @@ def dashboard():
                             )
                         if exercise_friend_name.strip():
                             name_ending = "이에요" if subject_particle(exercise_friend_name.strip()) == "이" else "예요"
-                            st.success(
+                            render_learning_success(
                                 f"가: 누구예요?\n\n나: {exercise_friend_name.strip()}{name_ending}. 제 친구예요.\n\n가: 한국 사람이에요?\n\n나: 아니요. {exercise_friend_country} 사람이에요.",
                                 icon=":material/forum:",
                             )
@@ -4967,11 +5495,25 @@ def dashboard():
                         )
                         if st.button("정답 확인", key="unit1_grammar1_final_check"):
                             if unit1_final_choice == final_answer:
-                                st.success(f"정답이에요! ‘{unit1_final_choice}’가 맞아요.")
-                                st.info(f"왜 정답일까요? {final_explanation}", icon=":material/lightbulb:")
+                                st.session_state["unit1_grammar1_final_passed"] = True
+                                render_learning_success(f"정답이에요! ‘{unit1_final_choice}’가 맞아요.")
+                                render_learning_info(f"왜 정답일까요? {final_explanation}", icon=":material/lightbulb:")
                             else:
-                                st.warning(f"정답은 ‘{final_answer}’입니다.")
-                                st.info(final_explanation, icon=":material/lightbulb:")
+                                st.session_state["unit1_grammar1_final_passed"] = False
+                                render_learning_warning(f"정답은 ‘{final_answer}’입니다.")
+                                render_learning_info(final_explanation, icon=":material/lightbulb:")
+                        unit1_grammar1_ready = (
+                            st.session_state.get("unit1_grammar1_picture_passed", False)
+                            and bool(exercise_friend_name.strip())
+                            and st.session_state.get("unit1_grammar1_final_passed", False)
+                        )
+                        st.checkbox(
+                            "그림 대화, 친구 소개와 마지막 문법 확인을 모두 마쳤어요",
+                            key="grammar1_done_1",
+                            disabled=not unit1_grammar1_ready,
+                        )
+                        if not unit1_grammar1_ready:
+                            st.caption("위의 세 활동을 모두 완료하면 문법 1 완료 표시가 열립니다.")
                     else:
                         if current_unit["number"] == 4:
                             unit4_picture_done = st.session_state.get("unit4_grammar1_picture_completed", False)
@@ -5021,6 +5563,20 @@ def dashboard():
                             )
                             if not unit6_activities_done:
                                 st.caption("먼저 1번 단위 명사 문제와 2번 말하기를 완료해 주세요.")
+                        elif current_unit["number"] in (7, 8, 9, 10):
+                            unit_number = current_unit["number"]
+                            custom_activities_done = st.session_state.get(
+                                f"unit{unit_number}_grammar1_activities_completed", False
+                            )
+                            if not custom_activities_done:
+                                st.session_state.pop(f"grammar1_done_{unit_number}", None)
+                            st.checkbox(
+                                "맞춤 활동과 네 문장 확인을 모두 마쳤어요",
+                                key=f"grammar1_done_{unit_number}",
+                                disabled=not custom_activities_done,
+                            )
+                            if not custom_activities_done:
+                                st.caption("먼저 이 단원의 맞춤 선택·말하기 활동을 완료해 주세요.")
                         else:
                             st.checkbox("네 문장을 소리 내어 읽고 문법 1을 마쳤어요", key=f"grammar1_done_{current_unit['number']}")
             else:
@@ -5051,48 +5607,48 @@ def dashboard():
                 st.markdown(f"<div class='eyebrow'>Grammar 2 · 오늘의 핵심</div><h2>{section['grammar2']}</h2>", unsafe_allow_html=True)
             grammar2_rule = GRAMMAR_RULES.get(section["grammar2"], "이 표현은 문장에서 어떤 역할을 하는지 예문과 함께 확인해 보세요.")
             if current_unit["number"] not in (4, 5, 6, 7, 8, 9, 10):
-                st.info(grammar2_rule, icon=":material/school:")
+                render_learning_info(grammar2_rule, icon=":material/school:")
             if current_unit["number"] == 2:
                 negative_columns = st.columns(2)
                 with negative_columns[0]:
-                    st.info("**받침 있음 → 이 아니에요**\n\n학생 → 학생이 아니에요.", icon=":material/spellcheck:")
+                    render_learning_info("**받침 있음 → 이 아니에요**\n\n학생 → 학생이 아니에요.", icon=":material/spellcheck:")
                 with negative_columns[1]:
-                    st.info("**받침 없음 → 가 아니에요**\n\n친구 → 친구가 아니에요.", icon=":material/spellcheck:")
+                    render_learning_info("**받침 없음 → 가 아니에요**\n\n친구 → 친구가 아니에요.", icon=":material/spellcheck:")
                 st.space("small")
                 st.markdown("**핵심 예문**")
                 example_columns = st.columns(2)
                 with example_columns[0]:
                     with st.container(border=True):
                         st.image(Path(__file__).with_name("assets") / "people" / "brothers.png", width=180)
-                        st.markdown("**가:** 동생이에요?  \n**나:** 아니요. 동생이 아니에요. 형이에요.")
+                        render_learning_markdown("**가:** 동생이에요?  \n**나:** 아니요. 동생이 아니에요. 형이에요.")
                 with example_columns[1]:
                     with st.container(border=True):
                         st.image(Path(__file__).with_name("assets") / "people" / "classrooms-203-204.png", width=180)
-                        st.markdown("**가:** 교실이 203호예요?  \n**나:** 아니요. 203호가 아니에요. 204호예요.")
+                        render_learning_markdown("**가:** 교실이 203호예요?  \n**나:** 아니요. 203호가 아니에요. 204호예요.")
             if current_unit["number"] == 1:
                 st.caption("명사 뒤에 붙여 이야기의 주제를 나타내요.")
                 particle_columns = st.columns(2)
                 with particle_columns[0]:
-                    st.info("**받침 있음 → 은**\n\n동생 → 동생은 대학생이에요.\n\n아버지 → 아버지는 요리사예요.", icon=":material/person:")
+                    render_learning_info("**받침 있음 → 은**\n\n동생 → 동생은 대학생이에요.\n\n아버지 → 아버지는 요리사예요.", icon=":material/person:")
                 with particle_columns[1]:
-                    st.info("**받침 없음 → 는**\n\n저 → 저는 한국 사람이에요.\n\n마리 → 마리는 회사원이에요.", icon=":material/person:")
+                    render_learning_info("**받침 없음 → 는**\n\n저 → 저는 한국 사람이에요.\n\n마리 → 마리는 회사원이에요.", icon=":material/person:")
                 st.space("small")
                 st.markdown("**대화로 먼저 익혀 보세요**")
                 grammar2_dialogues = st.columns(2)
                 with grammar2_dialogues[0]:
-                    with st.container(border=True, height=250):
-                        student_image, student_dialogue = st.columns([1, 2.5], gap=None, vertical_alignment="center")
+                    with st.container(border=True, height=250, key="unit1_grammar_dialogue_g2_student"):
+                        student_image, student_dialogue = st.columns([1.5, 2.5], gap=None, vertical_alignment="center")
                         with student_image:
-                            st.image(Path(__file__).with_name("assets") / "people" / "student.png", width=125)
+                            render_unit1_study_image("student.png")
                         with student_dialogue:
-                            st.markdown("가: 우진 씨 동생:orange[은] 대학생이에요?  \n\n나: 네. 제 동생:orange[은] 대학생이에요.")
+                            render_learning_markdown("가: 우진 씨 동생은 대학생이에요?  \n\n나: 네. 제 동생은 대학생이에요.")
                 with grammar2_dialogues[1]:
-                    with st.container(border=True, height=250):
-                        cook_image, cook_dialogue = st.columns([1, 2.5], gap=None, vertical_alignment="center")
+                    with st.container(border=True, height=250, key="unit1_grammar_dialogue_g2_cook"):
+                        cook_image, cook_dialogue = st.columns([1.5, 2.5], gap=None, vertical_alignment="center")
                         with cook_image:
-                            st.image(Path(__file__).with_name("assets") / "people" / "cook.png", width=125)
+                            render_unit1_study_image("cook.png")
                         with cook_dialogue:
-                            st.markdown("가: 아버지:blue[는] 요리사예요?  \n\n나: 네. 아버지:blue[는] 요리사예요.")
+                            render_learning_markdown("가: 아버지는 요리사예요?  \n\n나: 네. 아버지는 요리사예요.")
                 st.divider()
                 st.markdown("### 1. 그림을 보고 대화를 완성해 보세요.")
                 st.caption("인물과 직업을 확인하고 ‘은/는’을 사용해 알맞은 문장을 선택하세요.")
@@ -5108,8 +5664,8 @@ def dashboard():
                     with st.container(border=True):
                         question_column, answer_column = st.columns([1, 3], gap="small", vertical_alignment="center")
                         with question_column:
-                            st.image(Path(__file__).with_name("assets") / "people" / image_name, width=140)
-                            st.markdown(f"<div style='width:140px;text-align:right;margin-top:-1.15rem;font-weight:750'>{person} · {job}</div>", unsafe_allow_html=True)
+                            render_unit1_study_image(image_name)
+                            st.markdown(f"<div style='width:180px;text-align:right;margin-top:-1.15rem;font-weight:750'>{person} · {job}</div>", unsafe_allow_html=True)
                         with answer_column:
                             if "은" in answer_sentence:
                                 neun_sentence = answer_sentence.replace("은", "는", 1)
@@ -5130,39 +5686,39 @@ def dashboard():
                 saved_g2_feedback = st.session_state.get("unit1_grammar2_feedback")
                 grammar2_button_columns = st.columns([1, 1, 2])
                 with grammar2_button_columns[0]:
-                    if st.button("네 문장 확인", key="unit1_grammar2_check", type="primary", disabled=not grammar2_unlocked, use_container_width=True):
+                    if st.button("네 문장 확인", key="unit1_grammar2_check", type="primary", disabled=not grammar2_unlocked, width="stretch"):
                         st.session_state["unit1_grammar2_feedback"] = selected_g2_answers
                         saved_g2_feedback = selected_g2_answers
                         st.session_state["unit1_grammar2_quiz_passed"] = all(unit1_g2_answers)
                 with grammar2_button_columns[1]:
                     if saved_g2_feedback:
-                        st.button("확인 닫기", key="unit1_grammar2_feedback_close", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=("unit1_grammar2_feedback",))
+                        st.button("확인 닫기", key="unit1_grammar2_feedback_close", type="secondary", width="stretch", on_click=clear_session_state_key, args=("unit1_grammar2_feedback",))
                 if saved_g2_feedback:
                     if all(unit1_g2_answers):
-                        st.success("네 문장을 모두 정확히 완성했어요!", icon=":material/check_circle:")
+                        render_learning_success("네 문장을 모두 정확히 완성했어요!", icon=":material/check_circle:")
                     else:
-                        st.warning(f"{sum(unit1_g2_answers)}/4개가 맞아요. 받침이 있으면 ‘은’, 없으면 ‘는’을 사용해 보세요.")
+                        render_learning_warning(f"{sum(unit1_g2_answers)}/4개가 맞아요. 받침이 있으면 ‘은’, 없으면 ‘는’을 사용해 보세요.")
                     st.markdown("#### 문항별 피드백")
                     for index, (question, selected_answer) in enumerate(zip(people_questions, saved_g2_feedback)):
                         person, image_name, job, answer_sentence, answer_explanation = question
                         if selected_answer == answer_sentence:
-                            st.success(f"{index + 1}번 · {person}: 정답이에요. {answer_explanation}")
+                            render_learning_success(f"{index + 1}번 · {person}: 정답이에요. {answer_explanation}")
                         else:
-                            st.error(f"{index + 1}번 · {person}: 정답은 ‘{answer_sentence}’입니다. {answer_explanation}")
+                            render_learning_error(f"{index + 1}번 · {person}: 정답은 ‘{answer_sentence}’입니다. {answer_explanation}")
                 st.divider()
                 st.markdown("### 2. 사진을 보면서 친구를 소개해 보세요.")
                 st.caption("친구의 이름과 직업을 넣어 자연스럽게 소개해 보세요.")
                 friend_photo, friend_form = st.columns([1, 2], vertical_alignment="center")
                 with friend_photo:
-                    st.image(Path(__file__).with_name("assets") / "people" / "vietnam.png", width=210)
+                    render_unit1_study_image("vietnam.png", canvas_size=(220, 220), image_size=(205, 210))
                 with friend_form:
                     friend_name = st.text_input("친구 이름", placeholder="예: 마리", key="unit1_grammar2_friend_name")
                     friend_job = st.selectbox("친구 직업", ["회사원", "대학생", "선생님", "의사", "요리사", "가수"], key="unit1_grammar2_friend_job")
                 friend_particle = "은" if friend_name.strip() and subject_particle(friend_name.strip()) == "이" else "는"
                 job_ending = "이에요" if subject_particle(friend_job) == "이" else "예요"
-                friend_sentence = f"이 사람은 {friend_name.strip()}{friend_particle} 제 친구예요. {friend_name.strip()}{friend_particle} {friend_job}{job_ending}." if friend_name.strip() else ""
+                friend_sentence = f"{friend_name.strip()}{friend_particle} 제 친구예요. {friend_name.strip()}{friend_particle} {friend_job}{job_ending}." if friend_name.strip() else ""
                 if friend_sentence:
-                    st.success(friend_sentence, icon=":material/groups:")
+                    render_learning_success(friend_sentence, icon=":material/groups:")
                 unit1_g2_ready = st.session_state.get("unit1_grammar2_quiz_passed", False) and bool(friend_sentence)
                 st.checkbox("완성한 친구 소개를 소리 내어 읽고 3단계를 마쳤어요", key=f"grammar2_done_{current_unit['number']}", disabled=not unit1_g2_ready)
                 if not st.session_state.get("unit1_grammar2_quiz_passed", False):
@@ -5197,18 +5753,20 @@ def dashboard():
                         unit2_negative_results.append(selected == correct)
                 if st.button("네 문장 확인", key="unit2_negative_check", type="primary"):
                     if all(unit2_negative_results):
-                        st.success("네 문장을 모두 정확하게 완성했어요!", icon=":material/check_circle:")
+                        st.session_state["unit2_negative_quiz_passed"] = True
+                        render_learning_success("네 문장을 모두 정확하게 완성했어요!", icon=":material/check_circle:")
                     else:
+                        st.session_state["unit2_negative_quiz_passed"] = False
                         incorrect_indices = [
                             index for index, is_correct in enumerate(unit2_negative_results) if not is_correct
                         ]
                         incorrect_labels = ", ".join(f"{index + 1}번" for index in incorrect_indices)
-                        st.warning(
+                        render_learning_warning(
                             f"{sum(unit2_negative_results)}/4개가 맞아요. 틀린 문항은 {incorrect_labels}이에요."
                         )
                         for index in incorrect_indices:
                             correct_answer = unit2_negative_questions[index][2]
-                            st.info(f"{index + 1}번 정답: {correct_answer}")
+                            render_learning_info(f"{index + 1}번 정답: {correct_answer}")
                 st.divider()
                 st.markdown("### 2. 그림을 보고 ‘아니에요’가 들어간 알맞은 대답을 선택해 보세요.")
                 st.caption("그림 속 사람이나 물건을 확인하고 보기에서 알맞은 대답을 선택하세요.")
@@ -5219,6 +5777,7 @@ def dashboard():
                 ]
                 negative_dialogue_image_sizes = [(110, 110), (134, 89), (89, 134)]
                 negative_dialogue_columns = st.columns(3)
+                unit2_dialogue_results = []
                 for index, (label, image_name, question, correct_answer) in enumerate(negative_dialogue_cards):
                     with negative_dialogue_columns[index]:
                         with st.container(border=True):
@@ -5232,10 +5791,19 @@ def dashboard():
                             st.caption(label)
                             st.markdown(f"**가:** {question}")
                             selected_answer = st.radio("대답", [correct_answer, "네, 맞아요."], key=f"unit2_negative_dialogue_{index}", label_visibility="collapsed")
+                            unit2_dialogue_results.append(selected_answer == correct_answer)
                             if selected_answer == correct_answer:
-                                st.success("정답이에요.", icon=":material/check_circle:")
+                                render_learning_success("정답이에요.", icon=":material/check_circle:")
                             else:
-                                st.warning("오답이에요.", icon=":material/cancel:")
+                                render_learning_warning("오답이에요.", icon=":material/cancel:")
+                unit2_grammar2_ready = st.session_state.get("unit2_negative_quiz_passed", False) and all(unit2_dialogue_results)
+                st.checkbox(
+                    "두 활동의 일곱 문장을 모두 확인하고 문법 2를 마쳤어요",
+                    key="grammar2_done_2",
+                    disabled=not unit2_grammar2_ready,
+                )
+                if not unit2_grammar2_ready:
+                    st.caption("1번의 네 문장과 2번의 세 대화를 모두 맞히면 완료 표시가 열립니다.")
             elif current_unit["number"] == 3:
                 render_unit3_grammar2()
             elif current_unit["number"] == 4:
@@ -5260,7 +5828,7 @@ def dashboard():
                 feedback_state = st.session_state.get(feedback_key)
                 grammar_save_columns = st.columns([1, 1, 2])
                 with grammar_save_columns[0]:
-                    if st.button("정답 및 문법 확인", key=f"grammar_save_{current_unit['number']}", type="primary", disabled=not grammar2_unlocked or not grammar_sentence.strip(), use_container_width=True):
+                    if st.button("정답 및 문법 확인", key=f"grammar_save_{current_unit['number']}", type="primary", disabled=not grammar2_unlocked or not grammar_sentence.strip(), width="stretch"):
                         passed, feedback = check_grammar2_sentence(current_unit["number"], grammar_sentence)
                         st.session_state[feedback_key] = (passed, feedback, grammar_sentence.strip())
                         feedback_state = st.session_state[feedback_key]
@@ -5270,12 +5838,12 @@ def dashboard():
                             st.session_state.pop(checked_sentence_key, None)
                 with grammar_save_columns[1]:
                     if feedback_state and feedback_state[2] == grammar_sentence.strip():
-                        st.button("확인 닫기", key=f"grammar2_feedback_close_{current_unit['number']}", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=(feedback_key,))
+                        st.button("확인 닫기", key=f"grammar2_feedback_close_{current_unit['number']}", type="secondary", width="stretch", on_click=clear_session_state_key, args=(feedback_key,))
                 if feedback_state and feedback_state[2] == grammar_sentence.strip():
                     if feedback_state[0]:
-                        st.success(feedback_state[1], icon=":material/check_circle:")
+                        render_learning_success(feedback_state[1], icon=":material/check_circle:")
                     else:
-                        st.warning(feedback_state[1], icon=":material/rate_review:")
+                        render_learning_warning(feedback_state[1], icon=":material/rate_review:")
                 if grammar2_unlocked and not grammar_sentence.strip():
                     st.caption("문장을 입력하면 확인 버튼이 활성화됩니다.")
                 elif grammar2_unlocked and not sentence_verified:
@@ -5298,7 +5866,7 @@ def dashboard():
                         st.image(Path(__file__).with_name("assets") / "people" / "american.png", width=145)
                         st.caption("주노")
                 with greeting_dialogue:
-                    st.info(
+                    render_learning_info(
                         ":orange[안나: 안녕하세요? 저는 안나예요.]\n\n:blue[주노: 안녕하세요? 저는 주노예요.]\n\n:orange[안나: 주노 씨는 학생이에요?]\n\n:blue[주노: 네. 학생이에요. 안나 씨는요?]\n\n:orange[안나: 저는 회사원이에요.]",
                         icon=":material/forum:",
                     )
@@ -5311,21 +5879,21 @@ def dashboard():
                 checked_greeting = st.session_state.get("unit1_activity1_greeting_checked")
                 greeting_button_columns = st.columns([1, 1, 2])
                 with greeting_button_columns[0]:
-                    if st.button("1번 답 확인", key="unit1_activity1_greeting_check", type="primary", disabled=not greeting_answered, use_container_width=True):
+                    if st.button("1번 답 확인", key="unit1_activity1_greeting_check", type="primary", disabled=not greeting_answered, width="stretch"):
                         st.session_state["unit1_activity1_greeting_checked"] = (anna_job, juno_job)
                         checked_greeting = (anna_job, juno_job)
                         if anna_job == "회사원" and juno_job == "학생":
                             st.session_state["activity1_completed_1"] = True
                 with greeting_button_columns[1]:
                     if checked_greeting:
-                        st.button("확인 닫기", key="unit1_activity1_greeting_result_close", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=("unit1_activity1_greeting_checked",))
+                        st.button("확인 닫기", key="unit1_activity1_greeting_result_close", type="secondary", width="stretch", on_click=clear_session_state_key, args=("unit1_activity1_greeting_checked",))
                 if checked_greeting:
                     anna_correct = checked_greeting[0] == "회사원"
                     juno_correct = checked_greeting[1] == "학생"
                     if anna_correct and juno_correct:
-                        st.success("정답이에요. 안나는 회사원이고 주노는 학생이에요.", icon=":material/check_circle:")
+                        render_learning_success("정답이에요. 안나는 회사원이고 주노는 학생이에요.", icon=":material/check_circle:")
                     else:
-                        st.warning(f"{int(anna_correct) + int(juno_correct)}/2개가 맞아요. ‘저는 회사원이에요’는 안나, ‘네. 학생이에요’는 주노의 말이에요.")
+                        render_learning_warning(f"{int(anna_correct) + int(juno_correct)}/2개가 맞아요. ‘저는 회사원이에요’는 안나, ‘네. 학생이에요’는 주노의 말이에요.")
 
                 st.divider()
                 st.markdown("### 2. 이름과 직업을 선택해 인사 대화를 완성하고 소리 내어 읽어 보세요.")
@@ -5346,7 +5914,7 @@ def dashboard():
                     )
                 friend_job_ending = "이에요" if subject_particle(selected_friend_job) == "이" else "예요"
                 friend_name_ending = "이에요" if subject_particle(selected_friend_name) == "이" else "예요"
-                st.success(
+                render_learning_success(
                     f":orange[{selected_friend_name}: 안녕하세요? 저는 {selected_friend_name}{friend_name_ending}. {selected_friend_job}{friend_job_ending}.]",
                     icon=":material/record_voice_over:",
                 )
@@ -5377,7 +5945,7 @@ def dashboard():
                             width=100,
                         )
                 with activity1_dialogue:
-                    st.info(
+                    render_learning_info(
                         ":orange[재민: 안나 씨, 전화번호가 뭐예요?]\n\n"
                         ":blue[안나: 제 전화번호는 010-1359-6783이에요.]\n\n"
                         ":orange[재민: 010-1359-6784, 맞아요?]\n\n"
@@ -5401,7 +5969,7 @@ def dashboard():
                 activity1_check_result = st.session_state.get("unit2_activity1_check_result")
                 activity1_check_columns = st.columns([1, 1, 2])
                 with activity1_check_columns[0]:
-                    if st.button("1번 답 확인", key="unit2_activity1_check", type="primary", disabled=not activity1_answers_ready, use_container_width=True):
+                    if st.button("1번 답 확인", key="unit2_activity1_check", type="primary", disabled=not activity1_answers_ready, width="stretch"):
                         st.session_state["unit2_activity1_check_result"] = {
                             "topic": conversation_topic,
                             "phone": phone_answer,
@@ -5411,7 +5979,7 @@ def dashboard():
                         activity1_check_result = st.session_state["unit2_activity1_check_result"]
                 with activity1_check_columns[1]:
                     if activity1_check_result:
-                        st.button("확인 닫기", key="unit2_activity1_result_close", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=("unit2_activity1_check_result",))
+                        st.button("확인 닫기", key="unit2_activity1_result_close", type="secondary", width="stretch", on_click=clear_session_state_key, args=("unit2_activity1_check_result",))
                 if (
                     activity1_check_result
                     and activity1_check_result["topic"] == conversation_topic
@@ -5420,13 +5988,13 @@ def dashboard():
                     topic_correct = activity1_check_result["topic_correct"]
                     phone_correct = activity1_check_result["phone_correct"]
                     if topic_correct:
-                        st.success("1번 정답이에요. 정답: 전화번호", icon=":material/check_circle:")
+                        render_learning_success("1번 정답이에요. 정답: 전화번호", icon=":material/check_circle:")
                     else:
-                        st.warning("1번 오답이에요. 정답: 전화번호", icon=":material/cancel:")
+                        render_learning_warning("1번 오답이에요. 정답: 전화번호", icon=":material/cancel:")
                     if phone_correct:
-                        st.success("2번 정답이에요. 정답: 010-1359-6783", icon=":material/check_circle:")
+                        render_learning_success("2번 정답이에요. 정답: 010-1359-6783", icon=":material/check_circle:")
                     else:
-                        st.warning("2번 오답이에요. 정답: 010-1359-6783", icon=":material/cancel:")
+                        render_learning_warning("2번 오답이에요. 정답: 010-1359-6783", icon=":material/cancel:")
 
                 st.divider()
                 st.markdown("**2. 전화번호부에서 사람을 선택해 번호 대화를 완성해 보세요.**")
@@ -5449,7 +6017,7 @@ def dashboard():
                     )
                 with speaking_guide_column:
                     st.markdown("**대화 순서**")
-                    st.info(
+                    render_learning_info(
                         "1. 전화번호부에서 확인할 사람을 선택해요.\n\n"
                         "2. 전화번호부의 번호를 말해요.\n\n"
                         "3. 들은 번호가 맞는지 확인해요.\n\n"
@@ -5472,7 +6040,7 @@ def dashboard():
                 else:
                     correct_confirmation = f"아니요. {heard_phone[-4:]}가 아니에요. {correct_friend_phone[-4:]}이에요."
                     confirmation_choices = ["네, 맞아요.", correct_confirmation]
-                st.info(
+                render_learning_info(
                     f":orange[재민: {phone_friend} 씨, 전화번호가 뭐예요?]\n\n"
                     f":blue[{phone_friend}: {correct_friend_phone}이에요.]\n\n"
                     f":orange[재민: {heard_phone}, 맞아요?]\n\n"
@@ -5487,7 +6055,7 @@ def dashboard():
                 confirmation_result = st.session_state.get("unit2_activity1_confirmation_result")
                 confirmation_button_columns = st.columns([1, 1, 2])
                 with confirmation_button_columns[0]:
-                    if st.button("2번 답 확인", key="unit2_activity1_confirmation_check", type="primary", use_container_width=True):
+                    if st.button("2번 답 확인", key="unit2_activity1_confirmation_check", type="primary", width="stretch"):
                         confirmation_correct = confirmation_answer == correct_confirmation
                         st.session_state["unit2_activity1_confirmation_result"] = {
                             "friend": phone_friend,
@@ -5500,7 +6068,7 @@ def dashboard():
                             st.session_state["activity1_completed_2"] = True
                 with confirmation_button_columns[1]:
                     if confirmation_result:
-                        st.button("확인 닫기", key="unit2_activity1_confirmation_result_close", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=("unit2_activity1_confirmation_result",))
+                        st.button("확인 닫기", key="unit2_activity1_confirmation_result_close", type="secondary", width="stretch", on_click=clear_session_state_key, args=("unit2_activity1_confirmation_result",))
                 if (
                     confirmation_result
                     and confirmation_result["friend"] == phone_friend
@@ -5508,9 +6076,9 @@ def dashboard():
                     and confirmation_result["answer"] == confirmation_answer
                 ):
                     if confirmation_result["correct"]:
-                        st.success("정답이에요.", icon=":material/check_circle:")
+                        render_learning_success("정답이에요.", icon=":material/check_circle:")
                     else:
-                        st.warning("오답이에요.", icon=":material/cancel:")
+                        render_learning_warning("오답이에요.", icon=":material/cancel:")
             elif current_unit["number"] == 3:
                 render_unit3_activity1()
             elif current_unit["number"] == 4:
@@ -5545,12 +6113,40 @@ def dashboard():
                     ("cook.png", "웨이", "안녕하세요?  \n저는 웨이예요.  \n저는 중국 사람이에요.  \n요리사예요."),
                     ("female-singer.png", "유나", "안녕하세요?  \n저는 유나예요.  \n저는 한국 사람이에요.  \n가수예요."),
                 ]
-                for column, (image_name, name, introduction) in zip(introduction_columns, introductions):
+                st.markdown(
+                    """
+                    <style>
+                    div[class*="st-key-unit1_activity2_profile_"] { height:220px; }
+                    @media (max-width:760px) {
+                        div[class*="st-key-unit1_activity2_profile_"] [data-testid="stHorizontalBlock"] {
+                            display:grid !important; grid-template-columns:minmax(110px, 1fr) minmax(0, 2fr) !important;
+                            gap:10px !important; align-items:center !important;
+                        }
+            div[class*="st-key-unit1_activity2_profile_"] [data-testid="stColumn"] {
+                            min-width:0 !important; width:100% !important; flex:none !important;
+            }
+            div[class*="st-key-unit1_grammar_dialogue_"] [data-testid="stHorizontalBlock"] {
+                display:grid !important; grid-template-columns:minmax(150px, 1.5fr) minmax(0, 2.5fr) !important;
+                gap:8px !important; align-items:center !important;
+            }
+            div[class*="st-key-unit1_grammar_dialogue_"] [data-testid="stColumn"] {
+                min-width:0 !important; width:100% !important; height:auto !important; flex:none !important;
+            }
+                    }
+                    </style>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                for index, (column, (image_name, name, introduction)) in enumerate(zip(introduction_columns, introductions)):
                     with column:
-                        with st.container(border=True, height=300):
+                        with st.container(border=True, height=220, key=f"unit1_activity2_profile_{index}"):
                             image_column, text_column = st.columns([1, 2], vertical_alignment="center")
                             with image_column:
-                                st.image(Path(__file__).with_name("assets") / "people" / image_name, width=130)
+                                profile_image_width = 150 if index == 0 else 130
+                                st.image(
+                                    Path(__file__).with_name("assets") / "people" / image_name,
+                                    width=profile_image_width,
+                                )
                             with text_column:
                                 st.markdown(introduction)
                 answer_columns = st.columns(2)
@@ -5564,7 +6160,7 @@ def dashboard():
                 checked_profile_answers = st.session_state.get("unit1_activity2_profile_answers")
                 profile_button_columns = st.columns([1, 1, 2])
                 with profile_button_columns[0]:
-                    if st.button("1번 답 확인", key="unit1_activity2_profile_check", type="primary", disabled=not profile_answers_ready, use_container_width=True):
+                    if st.button("1번 답 확인", key="unit1_activity2_profile_check", type="primary", disabled=not profile_answers_ready, width="stretch"):
                         checked_profile_answers = {
                             "웨이 이름": wei_name.strip(),
                             "웨이 직업": wei_job,
@@ -5574,7 +6170,7 @@ def dashboard():
                         st.session_state["unit1_activity2_profile_answers"] = checked_profile_answers
                 with profile_button_columns[1]:
                     if checked_profile_answers:
-                        st.button("확인 닫기", key="unit1_activity2_profile_result_close", type="secondary", use_container_width=True, on_click=clear_session_state_key, args=("unit1_activity2_profile_answers",))
+                        st.button("확인 닫기", key="unit1_activity2_profile_result_close", type="secondary", width="stretch", on_click=clear_session_state_key, args=("unit1_activity2_profile_answers",))
                 if checked_profile_answers:
                     profile_feedback = [
                         ("웨이의 이름", checked_profile_answers["웨이 이름"], "웨이", "‘저는 웨이예요’에서 ‘저는’ 뒤의 말을 찾으면 돼요."),
@@ -5584,15 +6180,15 @@ def dashboard():
                     ]
                     profile_score = sum(selected == correct for _, selected, correct, _ in profile_feedback)
                     if profile_score == 4:
-                        st.success("이름과 직업을 모두 정확하게 찾았어요!", icon=":material/check_circle:")
+                        render_learning_success("이름과 직업을 모두 정확하게 찾았어요!", icon=":material/check_circle:")
                     else:
-                        st.warning(f"{profile_score}/4개가 맞아요. 아래에서 어떤 답을 다시 확인해야 하는지 살펴보세요.")
+                        render_learning_warning(f"{profile_score}/4개가 맞아요. 아래에서 어떤 답을 다시 확인해야 하는지 살펴보세요.")
                     st.markdown("#### 문항별 피드백")
                     for label, selected, correct, explanation in profile_feedback:
                         if selected == correct:
-                            st.success(f"{label}: ‘{selected}’ — 정답이에요. {explanation}")
+                            render_learning_success(f"{label}: ‘{selected}’ — 정답이에요. {explanation}")
                         else:
-                            st.error(f"{label}: 입력한 답은 ‘{selected}’예요. 정답은 ‘{correct}’입니다. {explanation}")
+                            render_learning_error(f"{label}: 입력한 답은 ‘{selected}’예요. 정답은 ‘{correct}’입니다. {explanation}")
 
                 st.divider()
                 st.markdown("### 2. 여러분을 소개하는 글을 써 보세요.")
@@ -5610,7 +6206,7 @@ def dashboard():
                 name_ending = "이에요" if intro_name.strip() and subject_particle(intro_name) == "이" else "예요"
                 response = f"안녕하세요? 저는 {intro_name.strip()}{name_ending}. 저는 {intro_country} 사람이에요. {intro_job}{'이에요' if subject_particle(intro_job) == '이' else '예요'}." if intro_name.strip() else ""
                 if response:
-                    st.success(response, icon=":material/record_voice_over:")
+                    render_learning_success(response, icon=":material/record_voice_over:")
                     st.caption("쓰기·말하기 점검: 문장을 확인한 뒤 천천히 소리 내어 읽어 보세요.")
             elif current_unit["number"] == 2:
                 st.space("small")
@@ -5620,7 +6216,7 @@ def dashboard():
                 st.space("small")
                 st.markdown("**2. 연습용 이름·전화번호·이메일 주소를 입력해 보세요.**")
                 st.caption("가상 연락처 한 줄을 모두 입력하면 제출할 수 있습니다. 더 연습하고 싶으면 세 줄까지 작성하세요.")
-                st.info(
+                render_learning_info(
                     "개인정보 보호를 위해 실제 연락처 대신 연습용 가상 정보를 사용하세요.\n\n"
                     "예: 마리 · 010-1234-5678 · mari@example.com\n\n"
                     "이메일은 @example.com이 고정되어 있으므로 @ 앞부분만 입력하세요.",
@@ -5673,7 +6269,7 @@ def dashboard():
                     st.caption("작성 중인 줄의 이름·전화번호·이메일 주소를 모두 입력해 주세요.")
                 response = "\n".join(" · ".join(row) for row in completed_contacts) if completed_contacts and not incomplete_contacts else ""
                 if response:
-                    st.success(response, icon=":material/contact_phone:")
+                    render_learning_success(response, icon=":material/contact_phone:")
             elif current_unit["number"] == 3:
                 response = render_unit3_activity2()
             elif current_unit["number"] == 4:
@@ -5708,12 +6304,30 @@ def dashboard():
                 args=(current_unit["number"],),
             )
             if st.session_state.get(f"activity2_submission_notice_{current_unit['number']}", False):
-                st.success("제출했어요. 오늘의 5단계 학습을 완료했습니다! +20 XP", icon=":material/check_circle:")
+                render_learning_success("제출했어요. 오늘의 5단계 학습을 완료했습니다! +20 XP", icon=":material/check_circle:")
+    st.space("medium")
+    st.markdown("## 단원 핵심 정리")
+    st.caption("1~5단계에서 배운 두 문법과 대표 문장을 마지막으로 확인하세요.")
+    summary_columns = st.columns(2)
+    for grammar_index, (column, grammar_name) in enumerate(zip(summary_columns, (section["grammar1"], section["grammar2"]))):
+        with column:
+            with st.container(border=True):
+                grammar_class = "grammar-one" if grammar_index == 0 else "grammar-two"
+                st.markdown(f'<h3 class="{grammar_class}">{html.escape(grammar_name)}</h3>', unsafe_allow_html=True)
+                st.write(GRAMMAR_RULES.get(grammar_name, "대표 예문과 활동에서 사용 방법을 다시 확인해 보세요."))
+    highlighted_example = highlight_learning_text(section["example"], current_unit["number"])
+    st.markdown(
+        f'<div class="grammar-feedback"><b>대표 문장</b><br>{highlighted_example}</div>',
+        unsafe_allow_html=True,
+    )
     st.space("medium")
     st.markdown(f'<div class="eyebrow">After unit completion · review</div><h2>오늘의 3단계 복습 루틴</h2><p class="sub">이것은 단원 학습 5단계와 별개의 복습 과정입니다. {current_unit["number"]}단원 5단계 학습을 모두 마친 뒤, 배운 내용을 짧게 다시 연습합니다.</p>', unsafe_allow_html=True)
     review_vocab_done = st.session_state.get(f"review_vocab_done_{current_unit['number']}", False)
     review_grammar_done = st.session_state.get(f"review_grammar_done_{current_unit['number']}", False)
     review_sentence_done = st.session_state.get(f"review_sentence_done_{current_unit['number']}", False)
+    review_unlocked = REVIEW_MODE or unit_completed
+    if not review_unlocked:
+        render_learning_info("단원 학습 5단계를 완료하면 복습 루틴이 열립니다.", icon=":material/lock:")
     if review_vocab_done and review_grammar_done and review_sentence_done:
         st.caption("오늘의 3단계 복습 루틴을 모두 완료했어요. 다시 할 필요가 없습니다.")
         st.button("복습 다시 시작", type="secondary", on_click=restart_review_routine, args=(current_unit["number"],))
@@ -5736,7 +6350,7 @@ def dashboard():
                         word,
                         key=f"review_vocab_read_{current_unit['number']}_{word}",
                         value=review_vocab_done,
-                        disabled=review_vocab_done,
+                        disabled=review_vocab_done or not review_unlocked,
                     )
                 )
         vocabulary_review_ready = all(vocabulary_learned_checks)
@@ -5744,8 +6358,8 @@ def dashboard():
             "어휘 복습 완료 ✓" if review_vocab_done else ("어휘 복습 완료하기" if vocabulary_review_ready else "3개를 읽으면 완료 가능"),
             key="task_vocab",
             type="primary" if vocabulary_review_ready and not review_vocab_done else "secondary",
-            disabled=review_vocab_done or not vocabulary_review_ready,
-            use_container_width=True,
+            disabled=review_vocab_done or not vocabulary_review_ready or not review_unlocked,
+            width="stretch",
             on_click=complete_vocabulary_review,
             args=(current_unit["number"],),
         )
@@ -5756,7 +6370,7 @@ def dashboard():
             key="task_grammar",
             type="primary" if review_vocab_done and not review_grammar_done else "secondary",
             disabled=not review_vocab_done or review_grammar_done,
-            use_container_width=True,
+            width="stretch",
             on_click=set_session_state_value,
             args=("go_practice",),
         )
@@ -5767,7 +6381,7 @@ def dashboard():
             key="task_sentence",
             type="primary" if review_grammar_done and not review_sentence_done else "secondary",
             disabled=not review_grammar_done or review_sentence_done,
-            use_container_width=True,
+            width="stretch",
             on_click=set_session_state_value,
             args=("go_builder",),
         )
