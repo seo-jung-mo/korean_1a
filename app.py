@@ -4119,22 +4119,47 @@ def render_unit6_vocabulary_panel(vocabulary_words, active_index, example_senten
     render_vocabulary_example(example_sentence, color="lime")
     st.divider()
     st.markdown(interface_text("### 2. 그림 속 물건은 몇 개 있어요? 알맞은 것을 선택해 보세요.", "### 2. How many objects are in the picture? Choose the correct Korean expression"))
+    st.caption(interface_text("왼쪽 그림의 물건을 하나씩 세고, 물건에 맞는 단위 명사까지 확인하세요.", "Count the objects in each picture and choose the matching Korean counter expression."))
     count_questions = [
         ("사과", ["열 개", "여섯 개", "다섯 개"], "열 개", "사과는 모두 열 개예요."),
         ("연필", ["여섯 자루", "네 자루", "열 자루"], "여섯 자루", "연필은 모두 여섯 자루예요."),
         ("책", ["열 권", "다섯 권", "여덟 권"], "열 권", "책은 모두 열 권이에요."),
         ("우유", ["열 개", "일곱 개", "아홉 개"], "열 개", "우유는 모두 열 개예요."),
     ]
-    count_done = render_choice_set(6, "vocab_count", count_questions)
+    quantity_image = Path(__file__).with_name("assets") / "units" / "unit6-quantity-grid.png"
+    count_images = [
+        crop_image_region(quantity_image, (18, 24, 378, 494)),
+        crop_image_region(quantity_image, (18, 510, 378, 994)),
+        crop_image_region(quantity_image, (1150, 24, 1518, 494)),
+        crop_image_region(quantity_image, (1150, 510, 1518, 994)),
+    ]
+    count_done = render_picture_word_cards(
+        6, "vocab_count", count_questions, count_images, single_image_width=180
+    )
     st.divider()
     st.markdown(interface_text("### 3. 그림을 보고 대화를 완성해 보세요.", "### 3. Look at the picture and complete each Korean dialogue"))
+    st.caption(interface_text("왼쪽 그림의 물건 수를 세고 알맞은 고유어 수 표현을 선택하세요.", "Count the objects on the left and choose the correct native Korean number expression."))
     dialogues = [
         ("가: 뭘 사요?\n나: 펜을 ______ 사요.", ["다섯 개", "다섯 명", "오 개"], "다섯 개", "펜은 다섯 개를 사요."),
         ("가: 뭘 사요?\n나: 지우개를 ______ 사요.", ["두 개", "둘 개", "이 명"], "두 개", "단위 명사 앞에서 ‘둘’은 ‘두’가 돼요."),
         ("가: 뭘 사요?\n나: 라면을 ______ 사요.", ["네 개", "넷 개", "사 개"], "네 개", "단위 명사 앞에서 ‘넷’은 ‘네’가 돼요."),
         ("가: 뭘 사요?\n나: 달걀을 ______ 사요.", ["열 개", "십 명", "열 권"], "열 개", "달걀은 ‘개’로 세어요."),
     ]
-    dialogue_done = render_choice_set(6, "vocab_dialogue", dialogues, dialogue_layout=True)
+    shopping_quantity_image = Path(__file__).with_name("assets") / "units" / "unit6-shopping-quantities-v2.png"
+    dialogue_images = [
+        crop_image_region(shopping_quantity_image, (0, 0, 622, 622)),
+        crop_image_region(shopping_quantity_image, (632, 0, 1254, 622)),
+        crop_image_region(shopping_quantity_image, (0, 632, 622, 1254)),
+        crop_image_region(shopping_quantity_image, (632, 632, 1254, 1254)),
+    ]
+    dialogue_done = render_picture_word_cards(
+        6,
+        "vocab_dialogue",
+        dialogues,
+        dialogue_images,
+        dialogue_layout=True,
+        single_image_width=180,
+    )
     return count_done and dialogue_done
 
 
@@ -4148,24 +4173,24 @@ def render_unit6_grammar1_intro():
         "<p><b>개:</b> 물건을 셀 때 사용해요. 예: 빵을 한 개 사요.</p><p><b>명:</b> 사람을 셀 때 사용해요. 예: 학생이 두 명 있어요.</p>"
         "<p><b>마리</b> 동물　<b>잔·병</b> 음료　<b>권</b> 책　<b>장</b> 종이　<b>살</b> 나이</p>",
     )
-    st.markdown(
-        "<h3 style='margin-bottom:-18px'>1. 그림을 보고 대화를 완성해 보세요.</h3>",
-        unsafe_allow_html=True,
-    )
-    render_unit6_reference(
-        "unit6-quantity-grid.png", "unit6-grammar1-exercise-guide",
-        "<p><b>그림을 잘 보세요.</b></p>"
-        "<p>사과·책·물·우유는 열 개(권·병)씩 있어요.</p>"
-        "<p>연필은 여섯 자루, 커피는 열 잔 있어요.</p>"
-        "<p>물건에 맞는 단위 명사를 골라 말해 보세요.</p>",
-    )
+    st.markdown(interface_text("### 1. 그림을 보고 대화를 완성해 보세요.", "### 1. Look at each picture and complete the Korean dialogue"))
+    st.caption(interface_text("물건을 세고 ‘개·권·병·자루’ 중 알맞은 단위 명사가 들어간 대답을 선택하세요.", "Count each object and choose the answer with the correct Korean counter."))
     questions = [
         ("사과가 몇 개 있어요?", ["열 개 있어요.", "여섯 개 있어요.", "다섯 개 있어요."], "열 개 있어요.", "그림의 사과는 열 개이고, 물건은 ‘개’로 세어요."),
         ("책이 몇 권 있어요?", ["열 권 있어요.", "다섯 권 있어요.", "여덟 권 있어요."], "열 권 있어요.", "그림의 책은 열 권이고, 책은 ‘권’으로 세어요."),
         ("물이 몇 병 있어요?", ["열 병 있어요.", "네 병 있어요.", "여섯 병 있어요."], "열 병 있어요.", "그림의 물병은 열 병이고, 병에 든 물은 ‘병’으로 세어요."),
         ("연필이 몇 자루 있어요?", ["여섯 자루 있어요.", "열 자루 있어요.", "두 자루 있어요."], "여섯 자루 있어요.", "그림의 연필은 여섯 자루이고, 연필은 ‘자루’로 세어요."),
     ]
-    picture_done = render_choice_set(6, "grammar1_picture", questions)
+    quantity_image = Path(__file__).with_name("assets") / "units" / "unit6-quantity-grid.png"
+    grammar1_images = [
+        crop_image_region(quantity_image, (18, 24, 378, 494)),
+        crop_image_region(quantity_image, (1150, 24, 1518, 494)),
+        crop_image_region(quantity_image, (782, 24, 1134, 494)),
+        crop_image_region(quantity_image, (18, 510, 378, 994)),
+    ]
+    picture_done = render_picture_word_cards(
+        6, "grammar1_picture", questions, grammar1_images, single_image_width=180
+    )
     st.divider()
     st.markdown(interface_text("### 2. 교실 물건과 수량을 선택해 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Choose a classroom object and quantity, then read the Korean dialogue aloud"))
     item = st.selectbox(interface_text("교실 물건", "Classroom object"), ["책상", "의자", "컴퓨터", "시계"], key="unit6_g1_item")
@@ -4188,20 +4213,22 @@ def render_unit6_grammar1_intro():
 def render_unit6_grammar2():
     render_learning_info(interface_text("상대방에게 공손하게 행동을 요청할 때 동사에 ‘-(으)세요’를 붙여요.", "Add -(으)세요 to a verb to make a polite Korean request."), icon=":material/school:")
     render_unit6_reference(
-        "unit6-convenience-store.png", "unit6-grammar2-guide",
+        "unit6-euseyo-actions-v2.png", "unit6-grammar2-guide",
         "<p><b>형태:</b> <b style='color:#b7ef58'>동사 + -(으)세요</b></p>"
-        "<p><b>받침 있음:</b> 앉다 → 앉으세요.　읽다 → 읽으세요.</p>"
-        "<p><b>받침 없음:</b> 오다 → 오세요.　타다 → 타세요.</p>"
-        "<p><b>특별한 형태:</b> 듣다 → 들으세요.　주다 → 주세요.</p>",
+        "<p><b>위 왼쪽 · 받침 있음:</b> 앉다 → <b style='color:#78aef8'>앉으세요</b>.</p>"
+        "<p><b>위 오른쪽 · 특별한 형태:</b> 듣다 → <b style='color:#78aef8'>들으세요</b>.</p>"
+        "<p><b>아래 왼쪽 · 하다:</b> 대답하다 → <b style='color:#78aef8'>대답하세요</b>.</p>"
+        "<p><b>아래 오른쪽 · 받침 없음:</b> 펴다 → <b style='color:#78aef8'>펴세요</b>.</p>",
     )
     st.markdown(interface_text("### 1. 문장에 알맞은 요청 표현을 선택해 보세요.", "### 1. Choose the correct Korean request expression"))
+    st.caption(interface_text("위 그림을 왼쪽 위부터 차례로 보며 상황에 알맞은 공손한 요청을 선택하세요.", "Read the four pictures from the top left and choose the polite request for each situation."))
     questions = [
         ("의자에", ["앉으세요.", "읽으세요.", "타세요."], "앉으세요.", "의자에는 ‘앉으세요’가 자연스러워요."),
         ("선생님 말을", ["들으세요.", "오세요.", "주세요."], "들으세요.", "말이나 음악은 ‘들으세요’라고 해요."),
         ("질문에", ["대답하세요.", "앉으세요.", "타세요."], "대답하세요.", "질문에는 ‘대답하세요’라고 해요."),
         ("책을", ["펴세요.", "오세요.", "주세요."], "펴세요.", "책을 펼치라는 요청은 ‘책을 펴세요’예요."),
     ]
-    first_done = render_choice_set(6, "grammar2_connect", questions)
+    first_done = render_choice_set(6, "grammar2_connect", questions, hide_reference_button=True)
     st.divider()
     st.markdown(interface_text("### 2. 그림을 보고 문장을 완성해 보세요.", "### 2. Look at the picture and complete each Korean sentence"))
     forms = [
@@ -4210,7 +4237,16 @@ def render_unit6_grammar2():
         ("여기로 ______. (오다)", ["오세요", "오으세요", "와요세요"], "오세요", "받침이 없으므로 ‘-세요’를 붙여요."),
         ("버스를 ______. (타다)", ["타세요", "타으세요", "타요세요"], "타세요", "받침이 없으므로 ‘-세요’를 붙여요."),
     ]
-    second_done = render_choice_set(6, "grammar2_forms", forms)
+    request_image = Path(__file__).with_name("assets") / "units" / "unit6-request-actions-v2.png"
+    request_images = [
+        crop_image_region(request_image, (0, 0, 622, 622)),
+        crop_image_region(request_image, (632, 0, 1254, 622)),
+        crop_image_region(request_image, (0, 632, 622, 1254)),
+        crop_image_region(request_image, (632, 632, 1254, 1254)),
+    ]
+    second_done = render_picture_word_cards(
+        6, "grammar2_forms", forms, request_images, single_image_width=180
+    )
     if first_done and second_done:
         st.session_state["grammar2_done_6"] = True
         render_learning_success(interface_text("문법 2의 1번과 2번을 모두 완료했어요.", "You completed both Grammar 2 activities."), icon=":material/check_circle:")
@@ -4221,6 +4257,7 @@ def render_unit6_grammar2():
 def render_unit6_activity1():
     st.subheader(interface_text("활동 1 · 과일 가게", "Activity 1 · Fruit Shop"))
     st.markdown(interface_text("### 1. 안나 씨가 과일 가게에 가요. 무슨 이야기를 할까요?", "### 1. Read the Korean fruit-shop dialogue and answer"))
+    st.caption(interface_text("그림과 대화를 함께 보고 안나 씨가 사는 과일의 수량과 전체 가격을 확인하세요.", "Use the picture and dialogue to identify the fruit quantity and total price."))
     render_unit6_reference(
         "unit6-fruit-shop.png", "unit6-activity1-guide",
         "<p><b>주인:</b> 어서 오세요. 무엇을 드릴까요?</p><p><b>안나:</b> 사과 얼마예요?</p>"
@@ -4230,7 +4267,7 @@ def render_unit6_activity1():
     reading_done = render_choice_set(6, "activity1_reading", [
         ("안나 씨는 무엇을 사요?", ["사과 다섯 개", "배 다섯 개", "사과 두 개"], "사과 다섯 개", "안나 씨는 사과 다섯 개를 사요."),
         ("모두 얼마예요?", ["10,000원", "2,000원", "5,000원"], "10,000원", "2,000원짜리 사과 다섯 개는 10,000원이에요."),
-    ])
+    ], hide_reference_button=True)
     st.markdown(interface_text("### 2. 무엇을 사요? 과일과 수량을 정하고 대화해 보세요.", "### 2. Choose a fruit and quantity, then practice the Korean dialogue"))
     fruit = st.selectbox(interface_text("과일", "Fruit"), ["사과", "배", "귤", "복숭아"], key="unit6_a1_fruit")
     quantity = st.selectbox(interface_text("수량", "Quantity"), ["한 개", "두 개", "세 개", "네 개", "다섯 개"], key="unit6_a1_quantity")
@@ -4250,6 +4287,7 @@ def render_unit6_activity1():
 def render_unit6_activity2():
     st.subheader(interface_text("활동 2 · 편의점", "Activity 2 · Convenience Store"))
     st.markdown(interface_text("### 1. 유진 씨가 편의점에 가요. 무엇을 몇 개 살까요?", "### 1. Read the Korean convenience-store dialogue and identify the quantities"))
+    st.caption(interface_text("그림과 대화를 함께 보고 물건별 수량과 전체 가격을 확인하세요.", "Use the picture and dialogue to identify each quantity and the total price."))
     render_unit6_reference(
         "unit6-convenience-store.png", "unit6-activity2-guide",
         "<p><b>유진:</b> 지우개 두 개하고 칫솔 다섯 개 주세요.</p>"
@@ -4259,7 +4297,7 @@ def render_unit6_activity2():
     reading_done = render_choice_set(6, "activity2_reading", [
         ("유진 씨는 무엇을 몇 개 사요?", ["지우개 두 개, 칫솔 다섯 개, 아이스크림 한 개", "지우개 다섯 개, 칫솔 두 개", "칫솔 한 개, 아이스크림 다섯 개"], "지우개 두 개, 칫솔 다섯 개, 아이스크림 한 개", "그림과 대화의 세 물건과 수량을 확인하세요."),
         ("모두 얼마예요?", ["24,000원", "10,000원", "20,000원"], "24,000원", "직원이 모두 24,000원이라고 말했어요."),
-    ])
+    ], hide_reference_button=True)
     st.markdown(interface_text("### 2. 여러분이 편의점에 가요. 무엇을 몇 개 사요? 써 보세요.", "### 2. You are going to a convenience store. What will you buy?"))
     unit6_choose_label = interface_text("선택하세요", "Choose")
     options = [unit6_choose_label, "지우개", "칫솔", "아이스크림", "물", "과자", "우유"]
@@ -5046,38 +5084,47 @@ def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_senten
             with col:
                 st.button(vocabulary_words[index], key=f"vocab_select_7_{index}", type="primary" if index == active_index else "secondary", on_click=select_vocabulary, args=(7,index), width="stretch")
     render_vocabulary_example(example_sentence, color="lime")
-    st.markdown(interface_text("### 예시문을 소리 내어 읽어 보세요.", "### Read the Korean example sentences aloud"))
-    st.dataframe(
-        [{"어휘": word, "예시문": VOCABULARY_EXAMPLES.get(7, {}).get(word, f"{word}{object_particle(word)} 사용해 보세요.")} for word in vocabulary_words],
-        hide_index=True, width="stretch",
-    )
     st.divider(); st.markdown(interface_text("### 2. 빈칸에 들어갈 요일을 선택해 보세요.", "### 2. Choose the correct Korean weekday for each blank"))
+    st.caption(interface_text("요일 카드를 왼쪽부터 읽으며 오늘과 다음 날의 관계를 확인하세요.", "Read the weekday cards from left to right and identify the following day."))
+    weekday_labels = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+    weekday_colors = ["#ef6b63", "#ef8d3c", "#e8b43e", "#64a85b", "#4f91d1", "#6574c4", "#9a67b2"]
+    weekday_cards = "".join(
+        f"<div style='flex:1;min-width:82px;padding:12px 7px;border-radius:10px;background:{color}20;border:1px solid {color};text-align:center;font-weight:850'>{day}</div>"
+        for day, color in zip(weekday_labels, weekday_colors)
+    )
+    st.markdown(f"<div style='display:flex;flex-wrap:wrap;gap:8px;margin:.4rem 0 1rem'>{weekday_cards}</div>", unsafe_allow_html=True)
     q = [("월요일 다음은 ___이에요.",["화요일","수요일","일요일"],"화요일","월요일 다음 날은 화요일이에요."),("금요일 다음은 ___이에요.",["토요일","목요일","월요일"],"토요일","금요일 다음 날은 토요일이에요."),("오늘이 수요일이면 내일은 ___이에요.",["목요일","화요일","금요일"],"목요일","수요일 다음 날은 목요일이에요.")]
-    done2 = render_choice_set(7,"vocab_weekday",q)
+    done2 = render_choice_set(7,"vocab_weekday",q, hide_reference_button=True)
     st.divider(); st.markdown(interface_text("### 3. 표에서 생일을 확인하고 빈칸에 알맞은 날짜를 선택해 보세요.", "### 3. Check the table and complete each Korean birthday dialogue"))
     st.caption(interface_text("이름과 생일을 확인한 뒤 알맞은 날짜로 대화를 완성하세요.", "Find each birthday in the table, then complete the dialogue."))
-    render_unit6_reference("unit7-birthday.png", "unit7-birthday-guide", "<p>달력에서 이름과 생일을 확인해요.</p><p>생일은 ‘월 + 일’로 말해요.</p><p>예: 10월 5일이에요.</p>")
-    st.table([
-        {"이름": "수지", "생일": "10월 5일"},
-        {"이름": "안나", "생일": "1월 16일"},
-        {"이름": "재민", "생일": "6월 22일"},
-    ])
     q3 = [
         ("가: 수지 씨, 생일이 언제예요?\n나: ___이에요.", ["10월 5일", "1월 16일", "6월 22일"], "10월 5일", "표에서 수지의 생일을 찾아요."),
         ("가: 안나 씨, 생일이 언제예요?\n나: ___이에요.", ["10월 5일", "1월 16일", "6월 22일"], "1월 16일", "표에서 안나의 생일을 찾아요."),
         ("가: 재민 씨, 생일이 언제예요?\n나: ___이에요.", ["10월 5일", "1월 16일", "6월 22일"], "6월 22일", "표에서 재민의 생일을 찾아요."),
         ("가: 생일이 언제예요?\n나: ___이에요.", ["10월 5일이에요.", "일곱 시예요.", "수요일이에요."], "10월 5일이에요.", "생일은 월과 일을 함께 말해요."),
     ]
-    dialogue_done = render_choice_set(7, "vocab_date_dialogue", q3, dialogue_layout=True)
+    birthday_picture, birthday_question = st.columns([0.8, 1.2], gap="small", vertical_alignment="top")
+    with birthday_picture:
+        st.image(Path(__file__).with_name("assets") / "units" / "unit7-birthday.png", width="stretch")
+    with birthday_question:
+        st.table([
+            {"이름": "수지", "생일": "10월 5일"},
+            {"이름": "안나", "생일": "1월 16일"},
+            {"이름": "재민", "생일": "6월 22일"},
+        ])
+        dialogue_done = render_choice_set(
+            7, "vocab_date_dialogue", q3, dialogue_layout=True, hide_reference_button=True
+        )
     return done2 and dialogue_done
 
 
 def render_unit7_grammar1():
     render_learning_info(interface_text("시간이나 날짜 뒤에 ‘에’를 붙여 언제 하는 일인지 말해요.", "Add 에 after a time or date to say when something happens."), icon=":material/school:")
     render_unit6_reference("unit7-calendar.png","unit7-grammar1-guide","<p><b>형태:</b> <b style='color:#b7ef58'>시간/날짜 + 에</b></p><p>수업은 일곱 시에 시작해요.</p><p>수요일에 한국어 수업이 있어요.</p>")
-    st.markdown(interface_text("### 1. 그림을 보고 대화를 완성해 보세요.", "### 1. Look at the picture and complete the Korean dialogue"))
-    qs=[("수업은 일곱 시__ 시작해요.",["에","에서","을"],"에","시간 뒤에는 ‘에’를 사용해요."),("수요일__ 친구를 만나요.",["에","에서","를"],"에","요일 뒤에도 ‘에’를 사용해요."),("3월 5일__ 생일이에요.",["에","은","을"],"에","날짜 뒤에는 ‘에’를 사용해요."),("금요일__ 영화가 있어요.",["에","를","에서"],"에","요일 뒤에는 ‘에’가 와요.")]
-    first=render_choice_set(7,"grammar1_time",qs)
+    st.markdown(interface_text("### 1. 문장을 읽고 빈칸에 알맞은 ‘에’를 선택해 보세요.", "### 1. Read each sentence and choose 에 for the blank"))
+    st.caption(interface_text("시간·요일·날짜 뒤에 붙는 조사를 확인하세요. 이 활동은 그림을 보지 않고 문장 형태에 집중해요.", "Focus on the particle used after a time, weekday, or date."))
+    qs=[("수업은 일곱 시__ 시작해요.",["에","에서","을"],"에","시간 뒤에는 ‘에’를 사용해요."),("수요일__ 친구를 만나요.",["에","에서","를"],"에","요일 뒤에도 ‘에’를 사용해요."),("3월 5일__ 생일 파티를 해요.",["에","은","을"],"에","날짜 뒤에는 ‘에’를 사용해요."),("금요일__ 영화가 있어요.",["에","를","에서"],"에","요일 뒤에는 ‘에’가 와요.")]
+    first=render_choice_set(7,"grammar1_time",qs, hide_reference_button=True)
     st.markdown(interface_text("### 2. 요일과 시간을 선택해 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Choose a weekday and time, then read the Korean dialogue aloud"))
     day=st.selectbox(interface_text("요일", "Weekday"),["월요일","화요일","수요일","목요일","금요일"],key="unit7_g1_day"); hour=st.selectbox(interface_text("시간", "Time"),["아홉 시","열 시","일곱 시"],key="unit7_g1_hour")
     render_learning_info(f"가: 언제 만나요?\n\n나: {day} {hour}에 만나요.",icon=":material/forum:")
@@ -5092,10 +5139,12 @@ def render_unit7_grammar2():
     render_learning_info(interface_text("시간을 물을 때 ‘몇 시예요?’라고 말하고, 시와 분을 함께 대답해요.", "Ask 몇 시예요? to find out the time, then answer with the hour and minutes."),icon=":material/school:")
     render_unit6_reference("unit7-time-lunch.png","unit7-grammar2-guide","<p><b>가:</b> 지금 몇 시예요?</p><p><b>나:</b> 일곱 시 삼십 분이에요.</p><p><b>가:</b> 언제 점심을 먹어요?</p><p><b>나:</b> 열두 시에 점심을 먹어요.</p>")
     st.markdown(interface_text("### 1. 알맞은 시간 표현을 선택해 보세요.", "### 1. Choose the correct Korean time expression"))
-    a=render_choice_set(7,"grammar2_clock",[("지금 몇 ___예요?",["시","명","월"],"시","시간을 물을 때는 ‘몇 시예요?’라고 해요."),("일곱 시 삼십 ___이에요.",["분","일","월"],"분","분은 시각의 분을 나타내요."),("수업은 아홉 ___에 시작해요.",["시","분","요일"],"시","시 뒤에 ‘에’를 붙여요.")])
+    st.caption(interface_text("위 그림은 7시 30분과 12시의 예시예요. 아래에서는 시간 표현의 형태를 확인하세요.", "The picture shows 7:30 and 12:00; the questions below check the form of Korean time expressions."))
+    a=render_choice_set(7,"grammar2_clock",[("지금 몇 ___예요?",["시","명","월"],"시","시간을 물을 때는 ‘몇 시예요?’라고 해요."),("일곱 시 삼십 ___이에요.",["분","일","월"],"분","분은 시각의 분을 나타내요."),("수업은 아홉 ___에 시작해요.",["시","분","요일"],"시","시 뒤에 ‘에’를 붙여요.")], hide_reference_button=True)
     st.markdown(interface_text("### 2. 오늘의 일정을 말해 보세요.", "### 2. Say today’s schedule in Korean"))
-    event=st.selectbox(interface_text("활동", "Activity"),["한국어 수업","친구 만나기","점심 먹기","운동하기"],key="unit7_g2_event"); t=st.selectbox(interface_text("시간", "Time"),["아홉 시","열두 시","세 시"],key="unit7_g2_time")
-    render_learning_info(f"오늘 {t}에 {event}를 해요.",icon=":material/forum:")
+    event_sentences={"한국어 수업":"한국어 수업이 있어요.","친구 만나기":"친구를 만나요.","점심 먹기":"점심을 먹어요.","운동하기":"운동해요."}
+    event=st.selectbox(interface_text("활동", "Activity"),list(event_sentences),key="unit7_g2_event"); t=st.selectbox(interface_text("시간", "Time"),["아홉 시","열두 시","세 시"],key="unit7_g2_time")
+    render_learning_info(f"오늘 {t}에 {event_sentences[event]}",icon=":material/forum:")
     if st.button(interface_text("2번 문장을 소리 내어 읽었어요", "I read the Activity 2 sentence aloud"),key="unit7_g2_speaking",type="primary"): st.session_state["unit7_g2_speaking_done"]=True; st.session_state["unit7_g2_checked_choice"]=(event,t)
     speaking_done = st.session_state.get("unit7_g2_speaking_done",False) and st.session_state.get("unit7_g2_checked_choice")== (event,t)
     if not speaking_done: st.session_state.pop("unit7_g2_speaking_done",None)
@@ -5105,8 +5154,20 @@ def render_unit7_grammar2():
 
 def render_unit7_activity1():
     st.subheader(interface_text("활동 1 · 세종학당 수업", "Activity 1 · Sejong Korean Class")); st.markdown(interface_text("### 1. 재민 씨와 안나 씨가 세종학당 수업 이야기를 해요. 무슨 이야기를 할까요?", "### 1. Read the Korean dialogue about class and answer"))
-    render_unit6_reference("unit7-classroom-calendar.png","unit7-activity1-guide","<p><b>재민:</b> 안나 씨, 언제 세종학당에 가요?</p><p><b>안나:</b> 목요일에 가요.</p><p><b>재민:</b> 수업은 몇 시에 시작해요?</p><p><b>안나:</b> 저녁 일곱 시에 시작해요.</p>")
-    done=render_choice_set(7,"activity1_schedule",[("안나 씨는 언제 세종학당에 가요?",["목요일","금요일","일요일"],"목요일","요일을 확인해요."),("수업은 몇 시에 시작해요?",["저녁 일곱 시","아침 아홉 시","열두 시"],"저녁 일곱 시","대화에서 시간을 찾아요.")])
+    st.caption(interface_text("왼쪽은 대화 상황이고, 오른쪽 일정 카드에서 요일과 시간을 정확히 확인하세요.", "The picture shows the situation; use the schedule card to confirm the exact day and time."))
+    activity_picture, activity_question = st.columns([0.9, 1.1], gap="small", vertical_alignment="top")
+    with activity_picture:
+        st.image(
+            crop_image_region(
+                Path(__file__).with_name("assets") / "units" / "unit7-classroom-calendar.png",
+                (0, 250, 1536, 1024),
+            ),
+            width="stretch",
+        )
+    with activity_question:
+        render_learning_info("**세종학당 수업 일정**\n\n📅 목요일\n\n🕒 저녁 일곱 시", icon=":material/event:")
+        st.markdown("**재민:** 안나 씨, 언제 세종학당에 가요?  \n**안나:** 목요일에 가요.  \n**재민:** 수업은 몇 시에 시작해요?  \n**안나:** 저녁 일곱 시에 시작해요.")
+        done=render_choice_set(7,"activity1_schedule",[("안나 씨는 언제 세종학당에 가요?",["목요일","금요일","일요일"],"목요일","일정 카드에서 요일을 확인해요."),("수업은 몇 시에 시작해요?",["저녁 일곱 시","아침 아홉 시","열두 시"],"저녁 일곱 시","일정 카드와 대화에서 시간을 확인해요.")], hide_reference_button=True)
     st.markdown(interface_text("### 2. 언제, 몇 시에 수업을 해요?", "### 2. Choose when the class is and read the Korean dialogue aloud")); day=st.selectbox(interface_text("요일", "Weekday"),["월요일","수요일","목요일","금요일"],key="unit7_a1_day"); tm=st.selectbox(interface_text("시간", "Time"),["아침 아홉 시","오후 세 시","저녁 일곱 시"],key="unit7_a1_time"); render_learning_info(f"{day} {tm}에 수업을 해요.",icon=":material/record_voice_over:")
     if st.button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit7_a1_speaking",type="primary"): st.session_state["unit7_a1_speaking_done"]=True; st.session_state["unit7_a1_checked_choice"]=(day,tm)
     speaking_done=st.session_state.get("unit7_a1_speaking_done",False) and st.session_state.get("unit7_a1_checked_choice")== (day,tm)
@@ -5117,8 +5178,23 @@ def render_unit7_activity1():
 
 def render_unit7_activity2():
     st.subheader(interface_text("활동 2 · 주노 씨의 하루", "Activity 2 · Juno’s Day")); st.markdown(interface_text("### 1. 주노 씨의 하루를 읽고 언제 무엇을 하는지 찾아보세요.", "### 1. Read Juno’s Korean schedule and find when he does each activity"))
-    render_unit6_reference("unit7-daily-schedule.png","unit7-activity2-guide","<p>주노 씨는 매일 여섯 시에 일어나요.</p><p>일곱 시에 아침을 먹어요.</p><p>열 시에 회의를 해요.</p><p>열두 시에 점심을 먹어요.</p>")
-    reading=render_choice_set(7,"activity2_day",[("주노 씨는 몇 시에 일어나요?",["여섯 시","일곱 시","열 시"],"여섯 시","하루 이야기를 확인해요."),("주노 씨는 열두 시에 무엇을 해요?",["점심을 먹어요.","회의를 해요.","일어나요."],"점심을 먹어요.","시간과 활동을 함께 찾아요.")])
+    st.caption(interface_text("왼쪽 그림의 네 장면을 위에서 아래로 보고, 오른쪽에서 정확한 시간과 활동을 짝지으세요.", "Read the four scenes from top to bottom and match each activity with its exact time on the right."))
+    day_picture, day_question = st.columns([0.9, 1.1], gap="small", vertical_alignment="top")
+    with day_picture:
+        st.image(
+            fit_image_to_canvas(Path(__file__).with_name("assets") / "units" / "unit7-daily-scenes-v2.png", canvas_size=(500, 334), image_size=(500, 334)),
+            width="stretch",
+        )
+    with day_question:
+        st.markdown(
+            "<div style='display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px'>"
+            "<div style='padding:11px;border:1px solid #334155;border-radius:10px'><b>① 여섯 시</b><br>일어나요.</div>"
+            "<div style='padding:11px;border:1px solid #334155;border-radius:10px'><b>② 일곱 시</b><br>아침을 먹어요.</div>"
+            "<div style='padding:11px;border:1px solid #334155;border-radius:10px'><b>③ 열 시</b><br>회의를 해요.</div>"
+            "<div style='padding:11px;border:1px solid #334155;border-radius:10px'><b>④ 열두 시</b><br>점심을 먹어요.</div>"
+            "</div>", unsafe_allow_html=True,
+        )
+        reading=render_choice_set(7,"activity2_day",[("주노 씨는 몇 시에 일어나요?",["여섯 시","일곱 시","열 시"],"여섯 시","하루 일정 카드의 첫 번째 장면을 확인해요."),("주노 씨는 열두 시에 무엇을 해요?",["점심을 먹어요.","회의를 해요.","일어나요."],"점심을 먹어요.","시간과 활동을 함께 확인해요.")], hide_reference_button=True)
     st.markdown(interface_text("### 2. 여러분의 하루를 써 보세요.", "### 2. Write your daily schedule in Korean")); rows=[]
     for i in range(3):
         c=st.columns(2); 
