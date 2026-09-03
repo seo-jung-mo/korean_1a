@@ -5106,12 +5106,12 @@ def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_senten
     birthday_picture, birthday_question = st.columns([0.8, 1.2], gap="small", vertical_alignment="top")
     with birthday_picture:
         st.image(Path(__file__).with_name("assets") / "units" / "unit7-birthday.png", width="stretch")
-    with birthday_question:
         st.table([
             {"이름": "수지", "생일": "10월 5일"},
             {"이름": "안나", "생일": "1월 16일"},
             {"이름": "재민", "생일": "6월 22일"},
         ])
+    with birthday_question:
         dialogue_done = render_choice_set(
             7, "vocab_date_dialogue", q3, dialogue_layout=True, hide_reference_button=True
         )
