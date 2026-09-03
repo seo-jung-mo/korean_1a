@@ -4,13 +4,14 @@ import html
 import os
 import re
 import sqlite3
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 import streamlit as st
-from PIL import Image, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 
 
 @st.cache_data(show_spinner=False)
@@ -24,6 +25,21 @@ def fit_image_to_canvas(image_path, canvas_size=(180, 140), image_size=None, ver
     offset = ((canvas_size[0] - fitted.width) // 2, offset_y)
     canvas.paste(fitted, offset, fitted)
     return canvas
+
+
+@st.cache_data(show_spinner=False)
+def crop_image_region(image_path, crop_box):
+    """Return one clearly framed learning item cropped from a composite illustration."""
+    with Image.open(image_path) as source:
+        cropped = source.convert("RGBA").crop(crop_box)
+    corner_mask = Image.new("L", cropped.size, 0)
+    ImageDraw.Draw(corner_mask).rounded_rectangle(
+        (0, 0, cropped.width - 1, cropped.height - 1),
+        radius=max(12, min(cropped.size) // 12),
+        fill=255,
+    )
+    cropped.putalpha(corner_mask)
+    return cropped
 
 
 def render_unit1_study_image(image_name, canvas_size=(180, 180), image_size=(165, 170)):
@@ -2280,50 +2296,87 @@ def render_unit_visual(unit_number, image_name, caption):
     st.caption(caption)
 
 
-def render_choice_set(unit_number, stage, questions, completion_key=None, dialogue_layout=False):
+def render_choice_set(
+    unit_number,
+    stage,
+    questions,
+    completion_key=None,
+    dialogue_layout=False,
+    scroll_below_picture=False,
+    hide_reference_button=False,
+    question_images=None,
+):
     """Render beginner-friendly selection questions and store completion after a perfect check."""
     selections = []
-    for index, (prompt, options, answer, hint) in enumerate(questions):
-        if ACTIVE_REFERENCE_IMAGE:
-            with st.popover(interface_text(f"{index + 1}번 참고 그림 다시 보기", f"View reference picture for Question {index + 1}"), width="stretch"):
-                st.image(ACTIVE_REFERENCE_IMAGE, width="stretch")
-                st.caption(interface_text("그림을 확인한 뒤 창을 닫으면 현재 문제 위치에서 계속할 수 있어요.", "Close the picture after checking it to continue from this question."))
-        if dialogue_layout:
-            dialogue_lines = "<br>".join(html.escape(line) for line in prompt.splitlines())
-            st.markdown(
-                f'<div style="display:flex;gap:.25rem;align-items:flex-start;margin:.65rem 0 .35rem;font-size:.875rem;font-weight:400">'
-                f'<div style="flex:0 0 auto;font-weight:400">{index + 1})</div>'
-                f'<div style="flex:1 1 auto;font-weight:400;line-height:1.75">{dialogue_lines}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-        selections.append(
-            st.selectbox(
-                f"{index + 1}) {prompt}" if not dialogue_layout else interface_text(f"{index + 1}번 답 선택", f"Choose answer {index + 1}"),
-                options,
-                index=None,
-                placeholder=interface_text("선택하세요", "Choose"),
-                key=f"unit{unit_number}_{stage}_choice_{index}",
-                label_visibility="visible" if not dialogue_layout else "collapsed",
-            )
-        )
+    question_area = (
+        st.container(height=360, border=True, key=f"unit{unit_number}_{stage}_question_scroll")
+        if scroll_below_picture
+        else nullcontext()
+    )
+    with question_area:
+        for index, (prompt, options, answer, hint) in enumerate(questions):
+            if ACTIVE_REFERENCE_IMAGE and not scroll_below_picture and not hide_reference_button:
+                with st.popover(interface_text(f"{index + 1}번 참고 그림 다시 보기", f"View reference picture for Question {index + 1}"), width="stretch"):
+                    st.image(ACTIVE_REFERENCE_IMAGE, width="stretch")
+                    st.caption(interface_text("그림을 확인한 뒤 창을 닫으면 현재 문제 위치에서 계속할 수 있어요.", "Close the picture after checking it to continue from this question."))
+            question_content = nullcontext()
+            if question_images:
+                with st.container(border=True):
+                    image_column, content_column = st.columns([1, 1.6], vertical_alignment="center")
+                    with image_column:
+                        st.image(question_images[index], width=200)
+                    question_content = content_column
+            with question_content:
+                if dialogue_layout:
+                    dialogue_lines = "<br>".join(html.escape(line) for line in prompt.splitlines())
+                    st.markdown(
+                        f'<div style="display:flex;gap:.25rem;align-items:flex-start;margin:.65rem 0 .35rem;font-size:.875rem;font-weight:400">'
+                        f'<div style="flex:0 0 auto;font-weight:400">{index + 1})</div>'
+                        f'<div style="flex:1 1 auto;font-weight:400;line-height:1.75">{dialogue_lines}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                selections.append(
+                    st.selectbox(
+                        f"{index + 1}) {prompt}" if not dialogue_layout else interface_text(f"{index + 1}번 답 선택", f"Choose answer {index + 1}"),
+                        options,
+                        index=None,
+                        placeholder=interface_text("선택하세요", "Choose"),
+                        key=f"unit{unit_number}_{stage}_choice_{index}",
+                        label_visibility="visible" if not dialogue_layout else "collapsed",
+                    )
+                )
     ready = all(selection is not None for selection in selections)
     result_key = f"unit{unit_number}_{stage}_result"
     checked_key = f"unit{unit_number}_{stage}_checked_selections"
+    feedback_key = f"unit{unit_number}_{stage}_feedback_visible"
+    results = st.session_state.get(result_key)
+    results_are_current = st.session_state.get(checked_key) == selections
+    if results is not None and not results_are_current:
+        st.session_state[feedback_key] = False
+    feedback_visible = bool(st.session_state.get(feedback_key, False)) and results_are_current
     if st.button(
-        interface_text("정답 확인", "Check answers"),
+        interface_text("설명 닫기", "Hide explanation")
+        if feedback_visible
+        else interface_text("정답 확인", "Check answers"),
         key=f"unit{unit_number}_{stage}_check",
         type="primary",
         disabled=not ready,
     ):
-        results = [selection == question[2] for selection, question in zip(selections, questions)]
-        st.session_state[result_key] = results
-        st.session_state[checked_key] = list(selections)
-        if all(results) and completion_key:
-            st.session_state[completion_key] = True
+        if feedback_visible:
+            st.session_state[feedback_key] = False
+        else:
+            results = [selection == question[2] for selection, question in zip(selections, questions)]
+            st.session_state[result_key] = results
+            st.session_state[checked_key] = list(selections)
+            st.session_state[feedback_key] = True
+            if all(results) and completion_key:
+                st.session_state[completion_key] = True
+        st.rerun()
     results = st.session_state.get(result_key)
     results_are_current = st.session_state.get(checked_key) == selections
-    if results is not None and results_are_current:
+    feedback_visible = bool(st.session_state.get(feedback_key, False)) and results_are_current
+    if results is not None and results_are_current and feedback_visible:
         if all(results):
             render_learning_success(interface_text(f"{len(results)}문제를 모두 정확하게 풀었어요!", f"You answered all {len(results)} questions correctly!"), icon=":material/check_circle:")
         else:
@@ -2337,6 +2390,99 @@ def render_choice_set(unit_number, stage, questions, completion_key=None, dialog
     elif completion_key:
         st.session_state.pop(completion_key, None)
     return bool(results) and results_are_current and all(results)
+
+
+def render_picture_word_cards(
+    unit_number,
+    stage,
+    questions,
+    question_images,
+    dialogue_layout=False,
+    single_image_width=120,
+):
+    """Render compact picture questions with independent check-and-close feedback."""
+    completed_questions = []
+    for index, ((prompt, options, answer, hint), question_image) in enumerate(zip(questions, question_images)):
+        choice_key = f"unit{unit_number}_{stage}_choice_{index}"
+        checked_key = f"unit{unit_number}_{stage}_card_checked_{index}"
+        result_key = f"unit{unit_number}_{stage}_card_result_{index}"
+        feedback_key = f"unit{unit_number}_{stage}_card_feedback_{index}"
+        with st.container(border=True):
+            paired_images = isinstance(question_image, (list, tuple))
+            column_widths = [0.75, 2.25] if paired_images else (
+                [0.65, 2.35] if single_image_width > 120 else [0.45, 2.55]
+            )
+            image_column, question_column = st.columns(column_widths, gap="small", vertical_alignment="center")
+            with image_column:
+                if isinstance(question_image, str):
+                    st.markdown(
+                        f'<div style="font-size:4.5rem;line-height:1;text-align:center;padding:.5rem 0">{html.escape(question_image)}</div>',
+                        unsafe_allow_html=True,
+                    )
+                elif paired_images:
+                    paired_image_columns = st.columns(len(question_image), gap="small")
+                    for paired_column, paired_image in zip(paired_image_columns, question_image):
+                        with paired_column:
+                            st.image(paired_image, width=90)
+                else:
+                    st.image(question_image, width=single_image_width)
+            with question_column:
+                if dialogue_layout:
+                    dialogue_lines = "<br>".join(html.escape(line) for line in prompt.splitlines())
+                    st.markdown(
+                        f'<div style="display:flex;gap:.25rem;align-items:flex-start;margin:.2rem 0 .35rem;font-size:.9rem">'
+                        f'<div style="flex:0 0 auto">{index + 1})</div>'
+                        f'<div style="flex:1 1 auto;line-height:1.7">{dialogue_lines}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                choice = st.selectbox(
+                    f"{index + 1}) {prompt}" if not dialogue_layout else interface_text(f"{index + 1}번 대화의 알맞은 답", f"Choose the answer for dialogue {index + 1}"),
+                    options,
+                    index=None,
+                    placeholder=interface_text("선택하세요", "Choose"),
+                    key=choice_key,
+                    label_visibility="visible" if not dialogue_layout else "collapsed",
+                )
+                feedback_current = st.session_state.get(checked_key) == choice
+                if not feedback_current:
+                    st.session_state[feedback_key] = False
+                feedback_visible = bool(st.session_state.get(feedback_key, False)) and feedback_current
+                if st.button(
+                    interface_text("설명 닫기", "Hide explanation")
+                    if feedback_visible
+                    else interface_text("정답 확인", "Check answer"),
+                    key=f"unit{unit_number}_{stage}_card_check_{index}",
+                    type="primary",
+                    disabled=choice is None,
+                ):
+                    if feedback_visible:
+                        st.session_state[feedback_key] = False
+                    else:
+                        st.session_state[checked_key] = choice
+                        st.session_state[result_key] = choice == answer
+                        st.session_state[feedback_key] = True
+                    st.rerun()
+                feedback_current = st.session_state.get(checked_key) == choice
+                feedback_visible = bool(st.session_state.get(feedback_key, False)) and feedback_current
+                if feedback_visible:
+                    if st.session_state.get(result_key, False):
+                        render_learning_success(interface_text("정답이에요!", "Correct!"), icon=":material/check_circle:")
+                    else:
+                        render_learning_warning(
+                            interface_text(f"다시 생각해 보세요. {hint}", f"Try again. {hint}"),
+                            icon=":material/lightbulb:",
+                        )
+        completed_questions.append(
+            st.session_state.get(result_key, False)
+            and st.session_state.get(checked_key) == choice
+        )
+    if all(completed_questions):
+        render_learning_success(
+            interface_text(f"{len(questions)}개 그림에 알맞은 말을 모두 찾았어요!", f"You matched all {len(questions)} pictures correctly!"),
+            icon=":material/celebration:",
+        )
+    return all(completed_questions)
 
 
 def render_unit3_grammar2():
@@ -2431,11 +2577,11 @@ def render_unit3_grammar2():
     with activity1_column:
         st.markdown(interface_text("### 1. 교실에 무엇이 있는지 확인하세요.", "### 1. Check what is in the classroom"))
         st.caption(interface_text("그림에서 사람과 물건을 찾아 알맞은 대답을 선택하세요.", "Find the people and objects in the picture, then choose the correct Korean answer."))
-        presence_done = render_choice_set(3, "grammar2_presence", presence_questions)
+        presence_done = render_choice_set(3, "grammar2_presence", presence_questions, scroll_below_picture=True)
     with activity2_column:
         st.markdown(interface_text("### 2. 그림을 보고 물건과 사람의 위치에 알맞은 문장을 선택해 보세요.", "### 2. Choose the sentence that matches each location"))
         st.caption(interface_text("왼쪽 그림을 보고 ‘어디에 있어요?’에 알맞은 위치 문장으로 대답하세요.", "Use the picture to answer 어디에 있어요? with the correct Korean location sentence."))
-        location_done = render_choice_set(3, "grammar2_location", location_questions)
+        location_done = render_choice_set(3, "grammar2_location", location_questions, scroll_below_picture=True)
     if presence_done and location_done:
         st.session_state["grammar2_done_3"] = True
         render_learning_success(interface_text("문법 2의 1번과 2번 활동을 모두 완료했어요!", "You completed both Grammar 2 activities!"), icon=":material/check_circle:")
@@ -2527,7 +2673,7 @@ def render_unit3_grammar1_intro():
         ("남자 옆에 있는 가방", ["이 가방", "그 가방", "저 가방"], "그 가방", "가방은 듣는 남자 가까이에 있어요."),
         ("두 사람에게서 멀리 있는 의자", ["이 의자", "그 의자", "저 의자"], "저 의자", "의자는 두 사람 모두에게 멀리 있어요."),
     ]
-    first_done = render_choice_set(3, "grammar1_picture", first_questions)
+    first_done = render_choice_set(3, "grammar1_picture", first_questions, hide_reference_button=True)
     st.divider()
     st.markdown(interface_text("### 2. 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Complete each Korean dialogue and read it aloud"))
     render_learning_info("가: 이 책은 누구 책이에요?\n\n나: 제 책이에요.", icon=":material/forum:")
@@ -2536,7 +2682,7 @@ def render_unit3_grammar1_intro():
         ("가: ___ 가방은 주노 씨 가방이에요? (말을 듣는 주노 가까이)  \n나: 네, 제 가방이에요.", ["이", "그", "저"], "그", "듣는 사람인 주노 가까이에 있으므로 ‘그’를 사용해요."),
         ("가: ___ 의자는 교실 의자예요? (두 사람에게서 멀리)  \n나: 네, 교실 의자예요.", ["이", "그", "저"], "저", "두 사람 모두에게 먼 의자이므로 ‘저’를 사용해요."),
     ]
-    second_done = render_choice_set(3, "grammar1_dialogue_v2", second_questions, dialogue_layout=True)
+    second_done = render_choice_set(3, "grammar1_dialogue_v2", second_questions, dialogue_layout=True, hide_reference_button=True)
     if first_done and second_done:
         st.session_state["unit3_grammar1_activities_completed"] = True
         render_learning_success(interface_text("문법 1의 1번과 2번 활동을 모두 완료했어요!", "You completed both Grammar 1 activities!"), icon=":material/check_circle:")
@@ -2632,7 +2778,7 @@ def render_unit3_vocabulary_dialogue():
         ("가: 가방이 책상 위에 있어요?\n\n나: ______", ["네, 책상 위에 있어요.", "아니요, 책상 위에 없어요. 의자 아래에 있어요.", "아니요, 교실에 시계가 없어요."], "아니요, 책상 위에 없어요. 의자 아래에 있어요.", "파란색 가방은 책상 위가 아니라 의자 아래에 있어요."),
         ("가: 교실에 시계가 있어요?\n\n나: ______", ["네, 시계가 있어요.", "아니요, 시계가 없어요.", "네, 가방이 있어요."], "네, 시계가 있어요.", "둥근 시계가 책상 위쪽 벽에 있어요."),
     ]
-    return render_choice_set(3, "vocab_dialogue", questions)
+    return render_choice_set(3, "vocab_dialogue", questions, hide_reference_button=True)
 
 
 def render_unit3_vocabulary_panel(vocabulary_words, active_index, example_sentence, selected_word, selected_meaning):
@@ -2836,26 +2982,38 @@ def render_unit4_grammar2():
 
     st.divider()
     st.markdown(interface_text("### 1. 그림을 보고 빈칸에 알맞은 문장을 선택해 보세요.", "### 1. Look at the picture and choose the correct Korean sentence"))
-    st.caption(interface_text("교재의 그림 낱말 중 좋아하는 대상을 골라 ‘을/를’이 들어간 문장을 완성하세요.", "Choose the sentence that uses 을/를 correctly for the pictured object."))
-    st.markdown(interface_text("**그림 낱말:** 🐈 고양이　🎵 음악　🎮 게임　🛍️ 쇼핑　🥬 김치　🥩 불고기", "**Korean picture words:** 🐈 고양이　🎵 음악　🎮 게임　🛍️ 쇼핑　🥬 김치　🥩 불고기"))
+    st.caption(interface_text("그림의 대상을 확인하고 ‘을’ 또는 ‘를’이 올바르게 들어간 문장을 선택하세요.", "Identify the pictured object and choose the sentence that uses 을 or 를 correctly."))
     preference_questions = [
         ("꽃 그림: 무엇을 좋아해요?", ["꽃을 좋아해요.", "꽃를 좋아해요.", "꽃이 좋아해요."], "꽃을 좋아해요.", "‘꽃’은 받침이 있으므로 ‘을’을 사용해요."),
         ("커피 그림: 무엇을 좋아해요?", ["커피를 좋아해요.", "커피을 좋아해요.", "커피가 좋아해요."], "커피를 좋아해요.", "‘커피’는 받침이 없으므로 ‘를’을 사용해요."),
         ("음악 그림: 무엇을 좋아해요?", ["음악을 좋아해요.", "음악를 좋아해요.", "음악에 좋아해요."], "음악을 좋아해요.", "‘음악’은 받침이 있으므로 ‘을’을 사용해요."),
         ("불고기 그림: 무엇을 좋아해요?", ["불고기를 좋아해요.", "불고기을 좋아해요.", "불고기가 좋아해요."], "불고기를 좋아해요.", "‘불고기’는 받침이 없으므로 ‘를’을 사용해요."),
     ]
-    preference_done = render_choice_set(4, "grammar2_preference", preference_questions)
+    unit4_particle_image = Path(__file__).with_name("assets") / "units" / "unit4-particle-objects-v2.png"
+    preference_images = [
+        crop_image_region(unit4_particle_image, (20, 20, 617, 617)),
+        crop_image_region(unit4_particle_image, (638, 20, 1234, 617)),
+        crop_image_region(unit4_particle_image, (20, 638, 617, 1234)),
+        crop_image_region(unit4_particle_image, (638, 638, 1234, 1234)),
+    ]
+    preference_done = render_picture_word_cards(
+        4,
+        "grammar2_preference",
+        preference_questions,
+        preference_images,
+        single_image_width=180,
+    )
 
     st.divider()
-    st.markdown(interface_text("### 2. 그림을 보고 대화를 완성해 보세요.", "### 2. Look at the picture and complete each Korean dialogue"))
-    st.caption(interface_text("행동의 대상을 확인하고 ‘을’ 또는 ‘를’을 선택하세요.", "Identify the object of the action and choose 을 or 를."))
+    st.markdown(interface_text("### 2. 대화를 읽고 빈칸에 알맞은 ‘을/를’을 선택해 보세요.", "### 2. Read each dialogue and choose the correct 을/를 for the blank"))
+    st.caption(interface_text("행동의 대상이 되는 말의 받침을 확인하세요.", "Check whether the object noun has a final consonant."))
     dialogue_questions = [
         ("가: 지금 무엇을 해요?\n나: 옷__ 사요.", ["을", "를", "이"], "을", "‘옷’은 받침이 있으므로 ‘을’을 붙여요."),
         ("가: 지금 음악을 들어요?\n나: 네. 음악__ 들어요.", ["을", "를", "가"], "을", "‘음악’은 받침이 있으므로 ‘을’을 붙여요."),
         ("가: 오늘 일해요?\n나: 아니요. 한국어__ 공부해요.", ["을", "를", "에"], "를", "‘한국어’는 받침이 없으므로 ‘를’을 붙여요."),
         ("가: 지금 무엇을 해요?\n나: 영화__ 봐요.", ["을", "를", "는"], "를", "‘영화’는 받침이 없으므로 ‘를’을 붙여요."),
     ]
-    dialogue_done = render_choice_set(4, "grammar2_dialogue", dialogue_questions, dialogue_layout=True)
+    dialogue_done = render_choice_set(4, "grammar2_dialogue", dialogue_questions, dialogue_layout=True, scroll_below_picture=True)
     if preference_done and dialogue_done:
         st.session_state["grammar2_done_4"] = True
         render_learning_success(interface_text("문법 2의 1번과 2번 활동을 모두 완료했어요!", "You completed both Grammar 2 activities!"), icon=":material/celebration:")
@@ -2868,15 +3026,14 @@ def render_unit4_grammar2():
 def render_unit4_vocabulary_panel(vocabulary_words, active_index, example_sentence):
     """Rebuild Unit 4 vocabulary around the textbook's three basic-verb tasks."""
     st.markdown(interface_text("### 1. 오늘 무엇을 해요?", "### 1. What are you doing today?"))
-    st.caption(interface_text("그림을 보고 기본 동사를 하나씩 누른 뒤 예문을 소리 내어 읽어 보세요.", "Look at the picture, select each Korean verb, and read its example sentence aloud."))
-    picture_column, word_column = st.columns([1, 1], gap="large", vertical_alignment="top")
+    picture_column, word_column = st.columns([0.82, 1.18], gap="small", vertical_alignment="top")
     with picture_column:
         st.image(
             fit_image_to_canvas(
                 remember_reference_image("unit4-action-grid.png"),
                 canvas_size=(500, 334), image_size=(500, 334),
             ),
-            width=500,
+            width="stretch",
         )
     with word_column:
         for start in range(0, len(vocabulary_words), 5):
@@ -2899,18 +3056,35 @@ def render_unit4_vocabulary_panel(vocabulary_words, active_index, example_senten
         ("친구", ["만나요", "자요", "요리해요"], "만나요", "친구는 ‘만나요’와 연결해요."),
         ("한국어", ["공부해요", "들어요", "먹어요"], "공부해요", "한국어는 ‘공부해요’와 연결해요."),
     ]
-    matching_done = render_choice_set(4, "vocab_matching", matching_questions)
+    matching_done = render_choice_set(4, "vocab_matching", matching_questions, hide_reference_button=True)
 
     st.divider()
     st.markdown(interface_text("### 3. 그림을 보고 무엇을 해요? 대답해 보세요.", "### 3. Look at each picture and answer 무엇을 해요?"))
-    st.caption(interface_text("네 장면의 동작을 확인하고 알맞은 문장을 선택하세요.", "Identify each action and choose the correct Korean sentence."))
+    st.caption(interface_text("왼쪽 그림에서 네 사람의 동작을 확인하고 알맞은 문장을 선택하세요.", "Look at the four people in the picture on the left and choose the correct Korean sentence for each action."))
     picture_questions = [
-        ("위 왼쪽 사람은 무엇을 해요?", ["밥을 먹어요.", "책을 읽어요.", "물을 마셔요."], "밥을 먹어요.", "식탁에서 밥을 먹고 있어요."),
-        ("위 오른쪽 사람은 무엇을 해요?", ["책을 읽어요.", "영화를 봐요.", "친구를 만나요."], "책을 읽어요.", "손에 펼친 책이 있어요."),
-        ("아래 왼쪽 사람은 무엇을 해요?", ["물을 마셔요.", "음악을 들어요.", "요리해요."], "물을 마셔요.", "잔의 물을 마시고 있어요."),
-        ("아래 오른쪽 사람은 무엇을 해요?", ["한국어를 공부해요.", "자요.", "친구를 만나요."], "한국어를 공부해요.", "책상에서 교재를 공부하고 있어요."),
+        ("왼쪽 그림의 위 왼쪽 사람은 무엇을 해요?", ["밥을 먹어요.", "책을 읽어요.", "물을 마셔요."], "밥을 먹어요.", "식탁에서 밥을 먹고 있어요."),
+        ("왼쪽 그림의 위 오른쪽 사람은 무엇을 해요?", ["책을 읽어요.", "영화를 봐요.", "친구를 만나요."], "책을 읽어요.", "손에 펼친 책이 있어요."),
+        ("왼쪽 그림의 아래 왼쪽 사람은 무엇을 해요?", ["물을 마셔요.", "음악을 들어요.", "요리해요."], "물을 마셔요.", "잔의 물을 마시고 있어요."),
+        ("왼쪽 그림의 아래 오른쪽 사람은 무엇을 해요?", ["한국어를 공부해요.", "자요.", "친구를 만나요."], "한국어를 공부해요.", "책상에서 교재를 공부하고 있어요."),
     ]
-    picture_done = render_choice_set(4, "vocab_picture", picture_questions)
+    picture_column, question_column = st.columns([0.82, 1.18], gap="small", vertical_alignment="top")
+    with picture_column:
+        st.image(
+            fit_image_to_canvas(
+                remember_reference_image("unit4-action-grid.png"),
+                canvas_size=(500, 334),
+                image_size=(500, 334),
+            ),
+            width="stretch",
+        )
+    with question_column:
+        picture_done = render_choice_set(
+            4,
+            "vocab_picture",
+            picture_questions,
+            scroll_below_picture=True,
+            hide_reference_button=True,
+        )
     return matching_done and picture_done
 
 
@@ -2989,14 +3163,30 @@ def render_unit4_grammar1_intro():
 
     st.divider()
     st.markdown(interface_text("### 1. 그림을 보고 대화를 완성해 보세요.", "### 1. Look at each picture and complete the Korean dialogue"))
-    st.caption(interface_text("교재의 네 장면을 보며 동사를 알맞은 ‘-아요/어요’ 형태로 선택하세요.", "Choose the correct -아요/어요 form for the action in each picture."))
+    st.caption(interface_text("각 그림의 동작을 보며 동사를 알맞은 ‘-아요/어요’ 형태로 선택하세요.", "Choose the correct -아요/어요 form for the action in each picture."))
+    unit4_action_image = Path(__file__).with_name("assets") / "units" / "unit4-action-grid.png"
+    unit4_movie_image = Path(__file__).with_name("assets") / "units" / "unit4-study-movie.png"
+    unit7_schedule_image = Path(__file__).with_name("assets") / "units" / "unit7-daily-schedule.png"
+    grammar1_question_images = [
+        crop_image_region(unit4_action_image, (780, 15, 1525, 505)),
+        crop_image_region(unit4_movie_image, (770, 220, 1530, 930)),
+        crop_image_region(unit4_action_image, (780, 520, 1525, 1015)),
+        crop_image_region(unit7_schedule_image, (455, 635, 585, 745)),
+    ]
     picture_questions = [
         ("가: 지금 무엇을 해요?\n나: 책을 ______.", ["읽어요", "읽아요", "읽해요"], "읽어요", "‘읽다’는 ‘읽어요’로 바뀌어요."),
-        ("가: 지금 무엇을 해요?\n나: 텔레비전을 ______.", ["봐요", "보어요", "보해요"], "봐요", "‘보아요’가 줄어서 ‘봐요’가 돼요."),
+        ("가: 지금 무엇을 해요?\n나: 영화를 ______.", ["봐요", "보어요", "보해요"], "봐요", "‘보아요’가 줄어서 ‘봐요’가 돼요."),
         ("가: 지금 공부해요?\n나: 네. 한국어를 ______.", ["공부해요", "공부아요", "공부어요"], "공부해요", "‘공부하다’는 ‘공부해요’로 바뀌어요."),
         ("가: 지금 일해요?\n나: 아니요. ______.", ["자요", "자어요", "자해요"], "자요", "‘자다’의 ‘아’ 모음 뒤에는 ‘-아요’가 붙어서 ‘자요’가 돼요."),
     ]
-    picture_done = render_choice_set(4, "grammar1_picture", picture_questions, dialogue_layout=True)
+    picture_done = render_picture_word_cards(
+        4,
+        "grammar1_picture",
+        picture_questions,
+        grammar1_question_images,
+        dialogue_layout=True,
+        single_image_width=180,
+    )
     if picture_done:
         st.session_state["unit4_grammar1_picture_completed"] = True
     else:
@@ -3100,7 +3290,7 @@ def render_unit3_activity1():
         ("이 가방은 누구 가방이에요?", ["마리 씨 가방이에요.", "유진 씨 가방이에요.", "안나 씨 가방이에요."], "마리 씨 가방이에요.", "유진 씨가 ‘그 가방은 마리 씨 가방이에요’라고 말했어요."),
         ("유진 씨 가방은 어디에 있어요?", ["책상 옆에 있어요.", "의자 아래에 있어요.", "필통 안에 있어요."], "책상 옆에 있어요.", "유진 씨가 ‘제 가방은 책상 옆에 있어요’라고 말했어요."),
     ]
-    reading_done = render_choice_set(3, "activity1_reading", reading_questions)
+    reading_done = render_choice_set(3, "activity1_reading", reading_questions, hide_reference_button=True)
 
     st.divider()
     st.markdown(interface_text("### 2. 표에서 한 줄을 선택해 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Choose one row, complete the Korean dialogue, and read it aloud"))
@@ -3203,7 +3393,7 @@ def render_unit4_activity1():
         ("마리 씨는 오늘 무엇을 해요?", ["한국어를 공부해요.", "친구를 만나요.", "영화를 봐요."], "한국어를 공부해요.", "마리가 ‘한국어를 공부해요’라고 말했어요."),
         ("재민 씨는 누구를 만나요?", ["친구를 만나요.", "마리 씨를 만나요.", "선생님을 만나요."], "친구를 만나요.", "재민이 ‘저는 친구를 만나요’라고 말했어요."),
     ]
-    reading_done = render_choice_set(4, "activity1_reading", reading_questions)
+    reading_done = render_choice_set(4, "activity1_reading", reading_questions, hide_reference_button=True)
 
     st.divider()
     st.markdown(interface_text("### 2. 사람과 할 일을 선택해 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Choose a person and activity, then read the completed Korean dialogue aloud"))
@@ -3305,7 +3495,7 @@ def render_unit3_activity2():
         ("침대 옆에 무엇이 있어요?", ["책이 있어요.", "가방이 있어요.", "시계가 있어요."], "책이 있어요.", "책 두 권이 침대 옆 작은 장 위에 있어요."),
         ("책상 위에 무엇이 있어요?", ["가방하고 컴퓨터가 있어요.", "책하고 시계가 있어요.", "침대하고 의자가 있어요."], "가방하고 컴퓨터가 있어요.", "소개 글에서 가방과 컴퓨터가 책상 위에 있다고 했어요."),
     ]
-    reading_done = render_choice_set(3, "activity2_reading", reading_questions)
+    reading_done = render_choice_set(3, "activity2_reading", reading_questions, hide_reference_button=True)
 
     st.divider()
     st.markdown(interface_text("### 2. 여러분 방에 무엇이 있어요? 그림을 그리고 써 보세요.", "### 2. What is in your room? Draw and write"))
@@ -3453,7 +3643,7 @@ def render_unit4_activity2():
         ("안나 씨는 어디에 있어요?", ["집에 있어요.", "공원에 있어요.", "학교에 있어요."], "집에 있어요.", "안나의 첫 메시지에 ‘지금 집에 있어요’라고 했어요."),
         ("유진 씨는 지금 뭐 해요?", ["운동해요.", "영화를 봐요.", "공부해요."], "운동해요.", "유진의 마지막 메시지에 ‘운동해요’라고 했어요."),
     ]
-    message_done = render_choice_set(4, "activity2_message", message_questions)
+    message_done = render_choice_set(4, "activity2_message", message_questions, hide_reference_button=True)
 
     st.divider()
     st.markdown(interface_text("### 2. 여러분은 오늘 무엇을 해요? 써 보세요.", "### 2. What are you doing today? Write three Korean sentences"))
@@ -3615,16 +3805,41 @@ def render_unit5_vocabulary_panel(vocabulary_words, active_index, example_senten
     render_vocabulary_example(example_sentence, color="lime" if active_index < 6 else "coral")
     st.divider()
     st.markdown(interface_text("### 2. 그림에 알맞은 말을 선택해 보세요.", "### 2. Choose the correct Korean word for each picture"))
-    questions = [
-        ("학교 건물", ["학교", "회사", "마트"], "학교", "학생들이 공부하는 장소예요."),
-        ("나무와 산책길", ["공원", "카페", "식당"], "공원", "산책하고 쉬는 장소예요."),
-        ("빵 그림", ["빵", "과자", "라면"], "빵", "식빵 모양을 확인하세요."),
-        ("우유병 그림", ["우유", "커피", "차"], "우유", "흰 우유가 든 병이에요."),
+    unit5_vocab_image = Path(__file__).with_name("assets") / "units" / "unit5-places-foods.png"
+    question_images = [
+        crop_image_region(unit5_vocab_image, (42, 160, 262, 535)),
+        crop_image_region(unit5_vocab_image, (1052, 160, 1260, 535)),
+        crop_image_region(unit5_vocab_image, (42, 600, 222, 875)),
+        crop_image_region(unit5_vocab_image, (1080, 600, 1198, 875)),
     ]
-    picture_done = render_choice_set(5, "vocab_picture", questions)
+    questions = [
+        (interface_text("이곳은 어디예요?", "Where is this place?"), ["학교", "회사", "마트"], "학교", "학생들이 공부하는 장소예요."),
+        (interface_text("이곳은 어디예요?", "Where is this place?"), ["공원", "카페", "식당"], "공원", "산책하고 쉬는 장소예요."),
+        (interface_text("이것은 무엇이에요?", "What is this?"), ["빵", "과자", "라면"], "빵", "식빵 모양을 확인하세요."),
+        (interface_text("이것은 무엇이에요?", "What is this?"), ["우유", "커피", "차"], "우유", "흰 우유가 든 병이에요."),
+    ]
+    picture_done = render_picture_word_cards(5, "vocab_picture", questions, question_images)
     st.divider()
     st.markdown(interface_text("### 3. 그림을 보고 대화를 완성해 보세요.", "### 3. Look at the picture and complete each Korean dialogue"))
     st.caption(interface_text("장소와 식품을 함께 확인하고 알맞은 두 문장을 선택하세요.", "Identify the place and food together, then choose the correct two-sentence Korean dialogue."))
+    dialogue_question_images = [
+        (
+            crop_image_region(unit5_vocab_image, (542, 160, 765, 535)),
+            crop_image_region(unit5_vocab_image, (248, 600, 425, 875)),
+        ),
+        (
+            crop_image_region(unit5_vocab_image, (800, 160, 1018, 535)),
+            crop_image_region(unit5_vocab_image, (880, 600, 1048, 875)),
+        ),
+        (
+            crop_image_region(unit5_vocab_image, (1052, 160, 1260, 535)),
+            crop_image_region(unit5_vocab_image, (1222, 600, 1358, 875)),
+        ),
+        (
+            crop_image_region(unit5_vocab_image, (1290, 160, 1500, 535)),
+            crop_image_region(unit5_vocab_image, (1080, 600, 1198, 875)),
+        ),
+    ]
     dialogue_questions = [
         ("가: 여기는 어디예요?\n나: ______\n가: 무엇을 먹어요?\n나: ______", [
             "식당이에요. 라면을 먹어요.", "카페예요. 우유를 사요.", "공원이에요. 커피를 마셔요."
@@ -3639,7 +3854,13 @@ def render_unit5_vocabulary_panel(vocabulary_words, active_index, example_senten
             "마트예요. 우유를 사요.", "카페예요. 과일을 먹어요.", "학교예요. 차를 마셔요."
         ], "마트예요. 우유를 사요.", "마트에서 우유를 사요."),
     ]
-    dialogue_done = render_choice_set(5, "vocab_dialogue", dialogue_questions, dialogue_layout=True)
+    dialogue_done = render_picture_word_cards(
+        5,
+        "vocab_dialogue",
+        dialogue_questions,
+        dialogue_question_images,
+        dialogue_layout=True,
+    )
     return picture_done and dialogue_done
 
 
@@ -3652,13 +3873,27 @@ def render_unit5_grammar1_intro():
         "<p style='margin-top:16px'><b>형태:</b> <b style='color:#b7ef58'>장소 + 에 가요</b></p>",
     )
     st.markdown(interface_text("### 1. 그림을 보고 대화를 완성해 보세요.", "### 1. Look at the picture and complete the Korean dialogue"))
+    st.caption(interface_text("각 사람의 목적지를 그림에서 확인하고 ‘장소에 가요’로 대답하세요.", "Identify each destination in the picture and answer with 장소에 가요."))
     questions = [
         ("마리 씨는 어디에 가요?", ["공원에 가요.", "공원을 가요.", "공원하고 가요."], "공원에 가요.", "가는 장소 뒤에는 ‘에’를 붙여요."),
         ("재민 씨는 어디에 가요?", ["회사에 가요.", "회사를 가요.", "회사하고 가요."], "회사에 가요.", "‘회사에 가요’가 맞아요."),
         ("안나 씨는 학교에 가요?", ["아니요. 마트에 가요.", "네. 마트를 가요.", "아니요. 마트하고 가요."], "아니요. 마트에 가요.", "목적지 ‘마트’ 뒤에 ‘에’를 붙여요."),
         ("유진 씨는 회사에 가요?", ["아니요. 카페에 가요.", "네. 카페를 가요.", "아니요. 카페하고 가요."], "아니요. 카페에 가요.", "‘카페에 가요’라고 말해요."),
     ]
-    picture_done = render_choice_set(5, "grammar1_picture", questions)
+    destination_image = Path(__file__).with_name("assets") / "units" / "unit5-destinations-v2.png"
+    destination_images = [
+        crop_image_region(destination_image, (0, 0, 622, 622)),
+        crop_image_region(destination_image, (632, 0, 1254, 622)),
+        crop_image_region(destination_image, (0, 632, 622, 1254)),
+        crop_image_region(destination_image, (632, 632, 1254, 1254)),
+    ]
+    picture_done = render_picture_word_cards(
+        5,
+        "grammar1_picture",
+        questions,
+        destination_images,
+        single_image_width=180,
+    )
     st.divider()
     st.markdown(interface_text("### 2. 어디에 가요? 무엇을 해요?", "### 2. Where are you going? What are you doing?"))
     destination = st.selectbox(interface_text("가는 장소", "Destination"), ["세종학당", "공원", "식당", "카페", "마트"], key="unit5_g1_destination")
@@ -3685,13 +3920,27 @@ def render_unit5_grammar2():
         "<p style='margin-top:16px'><b>형태:</b> <b style='color:#b7ef58'>명사 + 하고 + 명사</b></p>",
     )
     st.markdown(interface_text("### 1. 그림을 보고 대화를 완성해 보세요.", "### 1. Look at the picture and complete the Korean dialogue"))
+    st.caption(interface_text("각 그림에 함께 있는 두 대상이나 사람을 ‘하고’로 연결하세요.", "Connect the two pictured items, places, or people with 하고."))
     questions = [
         ("뭘 먹어요?", ["케이크하고 빵을 먹어요.", "케이크에 빵을 먹어요.", "케이크를 빵을 먹어요."], "케이크하고 빵을 먹어요.", "두 음식을 ‘하고’로 연결해요."),
         ("뭘 마셔요?", ["우유하고 차를 마셔요.", "우유에 차를 마셔요.", "우유를 차를 마셔요."], "우유하고 차를 마셔요.", "우유와 차를 ‘하고’로 연결해요."),
         ("어디에 가요?", ["영화관하고 카페에 가요.", "영화관에 카페를 가요.", "영화관를 카페에 가요."], "영화관하고 카페에 가요.", "두 장소를 ‘하고’로 연결해요."),
         ("누구를 만나요?", ["선생님하고 수지를 만나요.", "선생님에 수지를 만나요.", "선생님을 수지를 만나요."], "선생님하고 수지를 만나요.", "두 사람을 ‘하고’로 연결해요."),
     ]
-    first_done = render_choice_set(5, "grammar2_picture", questions)
+    hago_image = Path(__file__).with_name("assets") / "units" / "unit5-hago-pairs-v2.png"
+    hago_images = [
+        crop_image_region(hago_image, (0, 0, 622, 622)),
+        crop_image_region(hago_image, (632, 0, 1254, 622)),
+        crop_image_region(hago_image, (0, 632, 622, 1254)),
+        crop_image_region(hago_image, (632, 632, 1254, 1254)),
+    ]
+    first_done = render_picture_word_cards(
+        5,
+        "grammar2_picture",
+        questions,
+        hago_images,
+        single_image_width=180,
+    )
     st.divider()
     st.markdown(interface_text("### 2. 우리 교실에 무엇이 있어요? 누가 있어요?", "### 2. What and who are in our classroom?"))
     item1 = st.selectbox(interface_text("첫 번째 물건", "First object"), ["시계", "칠판", "책상", "컴퓨터"], key="unit5_g2_item1")
@@ -3724,7 +3973,7 @@ def render_unit5_activity1():
         ("주노 씨는 어디에 가요?", ["마트에 가요.", "공원에 가요.", "학교에 가요."], "마트에 가요.", "주노가 ‘마트에 가요’라고 말했어요."),
         ("주노 씨는 무엇을 사요?", ["빵하고 우유를 사요.", "옷하고 신발을 사요.", "라면하고 김밥을 먹어요."], "빵하고 우유를 사요.", "마트에서 빵과 우유를 사요."),
     ]
-    reading_done = render_choice_set(5, "activity1_reading", questions)
+    reading_done = render_choice_set(5, "activity1_reading", questions, hide_reference_button=True)
     st.markdown(interface_text("### 2. 어디에 가요? 무엇을 사요?", "### 2. Where are you going? What are you buying?"))
     place = st.selectbox(interface_text("장소", "Place"), ["식당", "백화점", "학교", "마트"], key="unit5_a1_place")
     items = {"식당":"라면하고 김밥을 먹어요", "백화점":"옷하고 신발을 사요", "학교":"한국어하고 영어를 공부해요", "마트":"빵하고 우유를 사요"}[place]
@@ -3754,7 +4003,7 @@ def render_unit5_activity2():
         ("수지 씨는 무엇을 사요?", ["신발하고 옷을 사요.", "화장품하고 가방을 사요.", "빵하고 우유를 사요."], "신발하고 옷을 사요.", "수지는 신발과 옷을 사요."),
         ("유진 씨는 무엇을 사요?", ["화장품하고 가방을 사요.", "신발하고 옷을 사요.", "과일하고 우유를 사요."], "화장품하고 가방을 사요.", "유진은 화장품과 가방을 사요."),
     ]
-    reading_done = render_choice_set(5, "activity2_reading", questions)
+    reading_done = render_choice_set(5, "activity2_reading", questions, hide_reference_button=True)
     st.markdown(interface_text("### 2. 여러분은 백화점에 가요. 무엇을 사요? 써 보세요.", "### 2. You are going to a department store. What will you buy?"))
     first = st.selectbox(interface_text("첫 번째 물건", "First item"), ["옷", "신발", "가방", "화장품", "모자"], key="unit5_a2_first")
     second = st.selectbox(interface_text("두 번째 물건", "Second item"), ["신발", "옷", "가방", "화장품", "모자"], key="unit5_a2_second")
@@ -4938,13 +5187,15 @@ def render_unit1_picture_dialogue():
     ]
     index_key = "unit1_picture_card_index"
     result_key = "unit1_picture_card_correct"
+    checked_choice_key = "unit1_picture_card_checked_choice"
+    feedback_key = "unit1_picture_card_feedback_visible"
     st.session_state.setdefault(index_key, 0)
     card_index = min(st.session_state[index_key], len(cards) - 1)
     card = cards[card_index]
     st.markdown(interface_text("### 3. 그림을 보고 대화를 완성해 보세요", "### 3. Look at the picture and complete the dialogue"))
     st.caption(interface_text("그림의 단서를 보고 알맞은 대답을 고르세요. 마지막 카드에서는 새로운 인물을 직접 만듭니다.", "Use the picture clues to choose the correct answer. On the final card, create a new person."))
     st.progress((card_index + 1) / len(cards), text=f"{interface_text('인물 카드', 'Person card')} {card_index + 1}/{len(cards)}")
-    image_column, dialogue_column = st.columns([1, 1.6], vertical_alignment="center")
+    image_column, dialogue_column = st.columns([0.65, 2.35], gap="small", vertical_alignment="center")
     with image_column:
         st.image(Path(__file__).with_name("assets") / "people" / card["image"], width=200)
     with dialogue_column:
@@ -4957,16 +5208,37 @@ def render_unit1_picture_dialogue():
                 index=None,
                 label_visibility="collapsed",
             )
-            if st.button(interface_text("대답 확인", "Check answer"), key=f"unit1_picture_check_{card_index}", type="primary", disabled=choice is None):
-                st.session_state[result_key] = choice == card["answer"]
-            if st.session_state.get(result_key) is True:
+            result_is_current = st.session_state.get(checked_choice_key) == choice
+            if not result_is_current:
+                st.session_state[feedback_key] = False
+            feedback_visible = bool(st.session_state.get(feedback_key, False)) and result_is_current
+            if st.button(
+                interface_text("설명 닫기", "Hide explanation")
+                if feedback_visible
+                else interface_text("대답 확인", "Check answer"),
+                key=f"unit1_picture_check_{card_index}",
+                type="primary",
+                disabled=choice is None,
+            ):
+                if feedback_visible:
+                    st.session_state[feedback_key] = False
+                else:
+                    st.session_state[result_key] = choice == card["answer"]
+                    st.session_state[checked_choice_key] = choice
+                    st.session_state[feedback_key] = True
+                st.rerun()
+            result_is_current = st.session_state.get(checked_choice_key) == choice
+            feedback_visible = bool(st.session_state.get(feedback_key, False)) and result_is_current
+            if feedback_visible and st.session_state.get(result_key) is True:
                 render_learning_success(interface_text("맞아요! 완성한 문장을 소리 내어 읽어 보세요.", "Correct! Read the completed Korean sentence aloud."), icon=":material/check_circle:")
                 render_vocabulary_example(card["answer"])
                 if st.button(interface_text("다음 인물 →", "Next person →"), key=f"unit1_picture_next_{card_index}"):
                     st.session_state[index_key] = card_index + 1
                     st.session_state.pop(result_key, None)
+                    st.session_state.pop(checked_choice_key, None)
+                    st.session_state.pop(feedback_key, None)
                     st.rerun()
-            elif st.session_state.get(result_key) is False:
+            elif feedback_visible and st.session_state.get(result_key) is False:
                 render_learning_warning(card["hint"], icon=":material/lightbulb:")
         else:
             mystery_country = st.selectbox(interface_text("나라 선택", "Choose a country"), ["캐나다", "베트남", "미국", "프랑스", "태국", "인도네시아", "중국", "일본", "러시아", "케냐"], key="unit1_mystery_country")
@@ -4981,6 +5253,8 @@ def render_unit1_picture_dialogue():
                 if st.button(interface_text("처음부터 다시 하기", "Start again"), key="unit1_picture_reset"):
                     st.session_state[index_key] = 0
                     st.session_state.pop(result_key, None)
+                    st.session_state.pop(checked_choice_key, None)
+                    st.session_state.pop(feedback_key, None)
                     st.session_state.unit1_picture_dialogue_done = False
                     st.rerun()
 
@@ -5210,7 +5484,6 @@ def dashboard():
                 st.subheader(interface_text("어휘와 표현 · 물건과 위치", "Vocabulary and Expressions · Objects and Locations"))
             elif current_unit["number"] == 4:
                 st.subheader(interface_text("어휘와 표현 · 기본 동작", "Vocabulary and Expressions · Basic Actions"))
-                render_unit_visual(4, "unit4-action-grid.png", interface_text("그림을 보고 먹어요, 읽어요, 마셔요, 공부해요를 확인해 보세요.", "Use the picture to identify 먹어요, 읽어요, 마셔요, and 공부해요."))
             elif current_unit["number"] == 5:
                 st.subheader(interface_text("어휘와 표현 · 장소와 식품", "Vocabulary and Expressions · Places and Foods"))
             elif current_unit["number"] == 6:
@@ -5224,7 +5497,10 @@ def dashboard():
             else:
                 st.subheader("핵심 어휘를 먼저 소리 내어 읽어요")
             vocabulary_guidance = interface_text("아래 단어와 예문을 소리 내어 읽어 보세요. 궁금한 뜻은 ‘뜻 보기’를 눌러 확인하세요.", "Read the Korean words and example sentences below aloud. Select ‘Show meaning’ whenever you need help.") if current_unit["number"] in (1, 2, 3, 4, 5, 6, 7, 8, 9) else "아래 단어와 예문을 소리 내어 읽어 보세요. 궁금한 뜻은 ‘뜻 보기’를 눌러 확인하세요."
-            st.caption(vocabulary_guidance)
+            if current_unit["number"] == 4:
+                st.caption(interface_text("그림을 보고 기본 동사를 하나씩 누르세요. 선택한 예문을 소리 내어 읽어 보세요.", "Look at the picture and select each basic Korean verb. Read the selected example sentence aloud."))
+            else:
+                st.caption(vocabulary_guidance)
             if current_unit["number"] == 2:
                 st.markdown(interface_text("### 1. 숫자를 소리 내어 읽어 보세요.", "### 1. Read the Korean numbers aloud"))
                 sino_numbers = [
@@ -5819,16 +6095,38 @@ def dashboard():
                     st.session_state.get(f"unit2_g1_picture_answer_{index}") is not None
                     for index in range(len(unit2_g1_picture_exercises))
                 )
-                if st.button(interface_text("1번 정답 확인", "Check Activity 1 answers"), key="unit2_g1_picture_check", type="primary", disabled=not unit2_g1_picture_ready):
-                    st.session_state["unit2_g1_picture_checked_answers"] = [
-                        st.session_state.get(f"unit2_g1_picture_answer_{index}")
-                        for index in range(len(unit2_g1_picture_exercises))
-                    ]
+                unit2_g1_current_answers = [
+                    st.session_state.get(f"unit2_g1_picture_answer_{index}")
+                    for index in range(len(unit2_g1_picture_exercises))
+                ]
+                unit2_g1_feedback_current = (
+                    st.session_state.get("unit2_g1_picture_checked_answers") == unit2_g1_current_answers
+                )
+                if not unit2_g1_feedback_current:
+                    st.session_state["unit2_g1_picture_feedback_visible"] = False
+                unit2_g1_feedback_visible = (
+                    st.session_state.get("unit2_g1_picture_feedback_visible", False)
+                    and unit2_g1_feedback_current
+                )
+                if st.button(
+                    interface_text("1번 설명 닫기", "Hide Activity 1 explanation")
+                    if unit2_g1_feedback_visible
+                    else interface_text("1번 정답 확인", "Check Activity 1 answers"),
+                    key="unit2_g1_picture_check",
+                    type="primary",
+                    disabled=not unit2_g1_picture_ready,
+                ):
+                    if unit2_g1_feedback_visible:
+                        st.session_state["unit2_g1_picture_feedback_visible"] = False
+                    else:
+                        st.session_state["unit2_g1_picture_checked_answers"] = unit2_g1_current_answers
+                        st.session_state["unit2_g1_picture_feedback_visible"] = True
+                        st.session_state["unit2_g1_picture_passed"] = all(unit2_g1_picture_answers)
+                    st.rerun()
+                if unit2_g1_feedback_visible:
                     if all(unit2_g1_picture_answers):
-                        st.session_state["unit2_g1_picture_passed"] = True
                         render_learning_success(interface_text("네 대화를 모두 정확하게 완성했어요.", "You completed all four dialogues correctly."), icon=":material/check_circle:")
                     else:
-                        st.session_state["unit2_g1_picture_passed"] = False
                         render_learning_warning(interface_text(f"{sum(unit2_g1_picture_answers)}/4개가 맞아요. 그림의 이름과 정보를 다시 확인해 보세요.", f"{sum(unit2_g1_picture_answers)}/4 are correct. Check the names and information in the pictures again."))
                 st.divider()
             if current_unit["number"] == 3:
@@ -5889,22 +6187,39 @@ def dashboard():
                 )
                 if not grammar1_unlocked:
                     render_learning_lock(interface_text("먼저 1단계 어휘와 표현을 완료해 주세요.", "Complete Step 1: Vocabulary and Expressions first."))
-                if st.button(interface_text("정답 확인", "Check answer"), key=f"grammar_check_{current_unit['number']}_{grammar_index}", disabled=not grammar1_unlocked or grammar_choice is None):
-                    st.session_state[f"grammar1_checked_choice_{current_unit['number']}_{grammar_index}"] = grammar_choice
-                    grammar_rule = GRAMMAR_RULES.get(section["grammar1"], "이 표현은 문장에서 어떤 역할을 하는지 예문과 함께 확인해 보세요.")
-                    unit2_explanations_en = {
-                        "‘전화번호’는 받침이 없으므로 ‘가’를 사용해요.": "전화번호 has no final consonant, so use 가.",
-                        "‘번호’는 받침이 없으므로 ‘가’를 사용해요.": "번호 has no final consonant, so use 가.",
-                        "‘민수 씨’가 행동의 주체이므로 ‘가’를 사용해요.": "민수 씨 is the subject performing the action, so use 가.",
-                        "받침이 있는 ‘수진’ 뒤에는 ‘이’를 사용해요.": "수진 ends in a final consonant, so use 이.",
-                    }
-                    explanation_support = unit2_explanations_en.get(explanation, explanation) if english_support_enabled() and current_unit["number"] == 2 else explanation
+                grammar_checked_key = f"grammar1_checked_choice_{current_unit['number']}_{grammar_index}"
+                grammar_feedback_key = f"grammar1_feedback_visible_{current_unit['number']}_{grammar_index}"
+                grammar_feedback_current = st.session_state.get(grammar_checked_key) == grammar_choice
+                if not grammar_feedback_current:
+                    st.session_state[grammar_feedback_key] = False
+                grammar_feedback_visible = st.session_state.get(grammar_feedback_key, False) and grammar_feedback_current
+                grammar_rule = GRAMMAR_RULES.get(section["grammar1"], "이 표현은 문장에서 어떤 역할을 하는지 예문과 함께 확인해 보세요.")
+                unit2_explanations_en = {
+                    "‘전화번호’는 받침이 없으므로 ‘가’를 사용해요.": "전화번호 has no final consonant, so use 가.",
+                    "‘번호’는 받침이 없으므로 ‘가’를 사용해요.": "번호 has no final consonant, so use 가.",
+                    "‘민수 씨’가 행동의 주체이므로 ‘가’를 사용해요.": "민수 씨 is the subject performing the action, so use 가.",
+                    "받침이 있는 ‘수진’ 뒤에는 ‘이’를 사용해요.": "수진 ends in a final consonant, so use 이.",
+                }
+                explanation_support = unit2_explanations_en.get(explanation, explanation) if english_support_enabled() and current_unit["number"] == 2 else explanation
+                if st.button(
+                    interface_text("설명 닫기", "Hide explanation")
+                    if grammar_feedback_visible
+                    else interface_text("정답 확인", "Check answer"),
+                    key=f"grammar_check_{current_unit['number']}_{grammar_index}",
+                    disabled=not grammar1_unlocked or grammar_choice is None,
+                ):
+                    if grammar_feedback_visible:
+                        st.session_state[grammar_feedback_key] = False
+                    else:
+                        st.session_state[grammar_checked_key] = grammar_choice
+                        st.session_state[grammar_result_key] = grammar_choice == answer
+                        st.session_state[grammar_feedback_key] = True
+                    st.rerun()
+                if grammar_feedback_visible:
                     if grammar_choice == answer:
-                        st.session_state[grammar_result_key] = True
                         render_learning_success(interface_text(f"정답이에요! ‘{grammar_choice}’가 맞아요.", f"Correct! ‘{grammar_choice}’ is the right answer."))
                         render_learning_info(interface_text(f"왜 정답일까요? {explanation}", f"Why? {explanation_support}"), icon=":material/lightbulb:")
                     else:
-                        st.session_state[grammar_result_key] = False
                         completed_sentence = sentence.replace("__", answer)
                         render_learning_warning(interface_text("아직 정답이 아니에요. 설명을 읽고 다시 선택해 보세요.", "Not correct yet. Read the explanation and choose again."))
                         choice_particle = subject_particle(grammar_choice)
