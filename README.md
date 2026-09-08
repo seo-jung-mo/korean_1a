@@ -10,12 +10,24 @@ O2O 한국어 학습 플랫폼의 Streamlit 프로토타입입니다.
 
 ## 실행
 
+Windows에서는 `실행.bat`를 더블 클릭하세요. 사용 가능한 가상 환경(`.venv-local`, `.venv-runtime`, `.venv` 순서)을 확인하고 서버를 시작한 뒤 기본 브라우저에서 http://127.0.0.1:8501 을 엽니다. 이미 서버가 실행 중이면 브라우저만 엽니다.
+
+사용 중에는 실행 창을 열어 두고, 종료하려면 실행 창에서 `Ctrl+C`를 누르세요.
+
+수동 실행 또는 최초 의존성 설치:
+
 ```bash
 python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
 주요 화면: 학습자 대시보드, 맞춤 복습, 오프라인 수업 Sync Mode, 과제 제출.
+
+단원별 완료 기록과 진행 중인 답안은 `gravity_korean.db`에 자동 저장됩니다. 다른 단원으로 이동하거나 재접속해도 이어서 학습할 수 있으며, 복습 중 답을 바꿔도 이미 완료한 단계는 유지됩니다. 현재 앱은 이 PC의 하나의 학습 기록을 사용합니다.
+
+저장 기능을 적용하기 전에 이미 사라진 과거 단계별 기록은 복원할 수 없습니다. 기존 XP와 일별 학습 기록은 유지됩니다.
+
+진도 저장 검증: `.venv-local\Scripts\python.exe -m unittest discover -s tools -p test_lesson_progress.py -v`
 
 ## 실제 음성 분석·실시간 Sync 연결
 
