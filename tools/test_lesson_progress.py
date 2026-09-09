@@ -155,8 +155,9 @@ class LessonAppTests(unittest.TestCase):
             sum("reading-line done" in str(markdown.value) for markdown in app.markdown),
             4,
         )
-        continue_button = app.button(key="unit1_picture_continue_grammar1")
-        self.assertTrue(continue_button.disabled)
+        complete_button = app.button(key="unit1_vocab_complete")
+        self.assertTrue(complete_button.disabled)
+        self.assertNotIn("unit1_picture_continue_grammar1", [button.key for button in app.button])
         disabled_guides = [
             str(markdown.value) for markdown in app.markdown
             if "disabled-button-guide" in str(markdown.value)
@@ -165,6 +166,12 @@ class LessonAppTests(unittest.TestCase):
         app.session_state["vocab_read_cards_1"] = list(range(18))
         app.run()
         self.assert_no_errors(app)
+        self.assertFalse(app.button(key="unit1_vocab_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"].get(1, 0), 0)
+        app.button(key="unit1_vocab_complete").click().run()
+        self.assert_no_errors(app)
+        self.assertEqual(app.session_state["_lesson_history"][1], 1)
+        self.assertNotIn("unit1_vocab_complete", [button.key for button in app.button])
         self.assertFalse(app.button(key="unit1_picture_continue_grammar1").disabled)
         self.assertFalse(app.button(key="unit1_picture_reset").disabled)
         app.button(key="unit1_picture_continue_grammar1").click().run()
@@ -204,6 +211,81 @@ class LessonAppTests(unittest.TestCase):
         self.assertEqual(restored.session_state["_lesson_history"][1], 1)
         self.assertEqual(restored.session_state["vocab_read_cards_1"], list(range(18)))
         self.assertIn("✓", restored.tabs[0].label)
+
+    def test_unit1_stage_completion_buttons_and_scoped_restarts(self):
+        LessonProgressStore(self.path).save({1: 2}, {
+            "vocab_rewarded_1": True,
+            "unit1_grammar1_friend_name": "민",
+            "unit2_saved_answer": "keep me",
+        })
+        app = self.app(1)
+        self.assertNotIn("grammar2_done_1", [widget.key for widget in app.checkbox])
+        self.assertTrue(app.button(key="unit1_grammar2_complete").disabled)
+        for index, option in enumerate([0, 1, 0, 1]):
+            radio = app.radio(key=f"unit1_grammar2_choice_{index}")
+            radio.set_value(radio.options[option])
+        app.text_input(key="unit1_grammar2_friend_name").set_value("민")
+        app.selectbox(key="unit1_grammar2_friend_job").select("선생님")
+        app.run()
+        app.button(key="unit1_grammar2_check").click().run()
+        self.assertFalse(app.button(key="unit1_grammar2_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"][1], 2)
+        app.button(key="unit1_grammar2_complete").click().run()
+        self.assert_no_errors(app)
+        self.assertEqual(app.session_state["_lesson_history"][1], 3)
+        self.assertNotIn("unit1_grammar2_complete", [button.key for button in app.button])
+        app.button(key="unit1_grammar2_continue_activity1").click().run()
+        self.assertIn("활동 1", app.session_state["_unit1_lesson_tabs"])
+        xp = app.session_state["total_xp"]
+        app.button(key="unit1_grammar2_replay").click().run()
+        self.assert_no_errors(app)
+        self.assertIn("문법 2", app.session_state["_unit1_lesson_tabs"])
+        self.assertTrue(app.button(key="unit1_grammar2_complete").disabled)
+        self.assertEqual(app.text_input(key="unit1_grammar2_friend_name").value, "")
+        self.assertIsNone(app.radio(key="unit1_grammar2_choice_0").value)
+        self.assertEqual(app.session_state["unit1_grammar1_friend_name"], "민")
+        app.button(key="unit1_vocab_replay").click().run()
+        self.assert_no_errors(app)
+        self.assertTrue(app.button(key="unit1_vocab_complete").disabled)
+        self.assertEqual(app.session_state["vocab_read_cards_1"], [])
+        self.assertEqual(app.session_state["unit1_read_round"], 0)
+        self.assertEqual(app.session_state["_lesson_history"][1], 3)
+        self.assertEqual(app.session_state["total_xp"], xp)
+        self.assertTrue(app.session_state["vocab_rewarded_1"])
+        self.assertEqual(app.session_state["unit2_saved_answer"], "keep me")
+
+    def test_unit1_activity1_completion_and_review_preserve_history(self):
+        LessonProgressStore(self.path).save({1: 3}, {
+            "unit1_grammar2_friend_name": "민",
+            "vocab_rewarded_1": True,
+        })
+        app = self.app(1)
+        self.assertNotIn("unit1_activity1_dialogue_read", [item.key for item in app.checkbox])
+        self.assertTrue(app.button(key="unit1_activity1_complete").disabled)
+        app.selectbox(key="unit1_activity1_anna_job").select("회사원")
+        app.selectbox(key="unit1_activity1_juno_job").select("학생")
+        app.run()
+        app.button(key="unit1_activity1_greeting_check").click().run()
+        self.assertFalse(app.button(key="unit1_activity1_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"][1], 3)
+        app.selectbox(key="unit1_activity1_anna_job").select("학생").run()
+        self.assertTrue(app.button(key="unit1_activity1_complete").disabled)
+        app.selectbox(key="unit1_activity1_anna_job").select("회사원").run()
+        app.button(key="unit1_activity1_complete").click().run()
+        self.assert_no_errors(app)
+        self.assertEqual(app.session_state["_lesson_history"][1], 4)
+        self.assertNotIn("unit1_activity1_complete", [button.key for button in app.button])
+        app.button(key="unit1_activity1_continue_activity2").click().run()
+        self.assertIn("활동 2", app.session_state["_unit1_lesson_tabs"])
+        xp = app.session_state["total_xp"]
+        app.button(key="unit1_activity1_replay").click().run()
+        self.assert_no_errors(app)
+        self.assertIn("활동 1", app.session_state["_unit1_lesson_tabs"])
+        self.assertTrue(app.button(key="unit1_activity1_complete").disabled)
+        self.assertNotIn("unit1_activity1_greeting_checked", app.session_state.filtered_state)
+        self.assertEqual(app.session_state["_lesson_history"][1], 4)
+        self.assertEqual(app.session_state["total_xp"], xp)
+        self.assertEqual(app.session_state["unit1_grammar2_friend_name"], "민")
 
     def test_answers_survive_unit_switch_restart_and_explicit_clear(self):
         app = self.app(5)
@@ -302,7 +384,12 @@ class LessonAppTests(unittest.TestCase):
         app = self.locked_app()
         self.assert_no_errors(app)
         home = app.button(key="go_home")
-        self.assertIn("XP", home.help)
+        self.assertFalse(home.help)
+        self.assertTrue(any(
+            'class="home-button-guide"' in str(markdown.value)
+            and "XP" in str(markdown.value)
+            for markdown in app.markdown
+        ))
         home.click().run()
         self.assert_no_errors(app)
         self.assertEqual(app.session_state["_lesson_history"][1], 2)
