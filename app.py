@@ -153,9 +153,14 @@ def disabled_button_help(label, key=None):
 
 def prepare_lesson_progress():
     """Restore once, then detach saved answer keys from widget cleanup."""
+    # Older versions saved this display-only button as lesson progress.
+    # Button values cannot be restored through Streamlit session state.
+    st.session_state.pop("unit1_activity2_completed", None)
+    st.session_state.get("_lesson_saved_values", {}).pop("unit1_activity2_completed", None)
     if "_lesson_store" not in st.session_state:
         store = LessonProgressStore(DB_PATH)
         history, values = store.load()
+        values.pop("unit1_activity2_completed", None)
         # A replay must not resurrect answers saved by the previous widget
         # generation. Keep completion history, XP, and the replay flags.
         replay_cleanup = {
@@ -209,6 +214,15 @@ def checkpoint_lesson_progress():
 def navigate_to_page(page_name):
     """Change the sidebar page safely before its navigation widget is rendered."""
     st.session_state.page_nav = page_name
+
+
+def return_to_unit1_wrap_up():
+    """Return from the final sentence review to Unit 1's completion message."""
+    st.session_state.selected_unit_number = 1
+    st.session_state.unit1_wrap_up_completed = True
+    st.session_state.page_nav = "내 학습"
+    st.session_state.scroll_unit1_wrap_up = True
+    save_progress()
 
 
 def restart_current_unit_from_home(unit_number):
@@ -271,6 +285,24 @@ def complete_unit1_grammar1():
     """Confirm Unit 1 Grammar 1 after its required activities are complete."""
     st.session_state.grammar1_done_1 = True
     st.session_state.unit1_grammar1_reviewing = False
+    # Keep this stage selected when its label gains the completion check mark.
+    st.session_state["_unit1_lesson_tabs"] = interface_text("● 문법 1  ✓", "● Grammar 1  ✓")
+
+
+def unit1_wrap_up_ready():
+    """Require Activity 2, the summary, and all three review stages."""
+    return get_unit_completion_steps(1)[4] and all(
+        st.session_state.get(key, False)
+        for key in (
+            "unit1_summary_confirmed", "review_vocab_done_1",
+            "review_grammar_done_1", "review_sentence_done_1",
+        )
+    )
+
+
+def complete_unit1_wrap_up():
+    if unit1_wrap_up_ready():
+        st.session_state.unit1_wrap_up_completed = True
 
 
 def restart_unit1_stage(stage):
@@ -340,6 +372,19 @@ def restart_unit1_activity2():
     request_lesson_tab(1, 4)
 
 
+def render_unit1_action_columns(completion_message=None, *, stage):
+    """Place completed-stage feedback beside its replay and next actions."""
+    with st.container(key=f"unit1_action_row_{stage}"):
+        if completion_message:
+            status_column, replay_column, action_column = st.columns(
+                [1, 1, 1], vertical_alignment="center",
+            )
+            with status_column:
+                render_learning_success(completion_message, icon=":material/check_circle:")
+            return replay_column, action_column
+        return st.columns([1, 1], vertical_alignment="center")
+
+
 def render_unit1_stage_actions(stage, ready, completion_help=None):
     """Use the same restart / complete / continue flow as Grammar 1."""
     stage_options = {
@@ -351,9 +396,11 @@ def render_unit1_stage_actions(stage, ready, completion_help=None):
     title = interface_text(title_ko, title_en)
     finished = get_unit_completion_steps(1)[stage_index] and not st.session_state.get(f"unit1_{stage}_reviewing", False)
     st.divider()
-    if finished:
-        render_learning_success(interface_text(f"{title} 학습을 완료했어요 ✓", f"You completed {title} ✓"), icon=":material/check_circle:")
-    replay_column, action_column = st.columns([1, 1.25])
+    replay_column, action_column = render_unit1_action_columns(
+        interface_text(f"{title} 학습을 완료했어요 ✓", f"You completed {title} ✓")
+        if finished else None,
+        stage=stage,
+    )
     with replay_column:
         lesson_button(
             interface_text(f"{title} 다시 학습하기", f"Practice {title} again"),
@@ -385,30 +432,42 @@ def render_lesson_tab_navigation(tab_index):
         (() => {{
           const tabIndex = {int(tab_index)};
           let attempts = 0;
+          let aligned = false;
           const selectTab = () => {{
+            if (attempts > 20) return;
             const groups = window.parent.document.querySelectorAll('div[data-testid="stTabs"]');
             const group = groups[groups.length - 1];
             const tabs = group ? group.querySelectorAll('[role="tab"]') : [];
             const target = tabs[tabIndex];
             if (target) {{
-              target.click();
+              if (target.getAttribute('aria-selected') !== 'true') {{
+                target.click();
+              }}
+              if (!aligned) {{
+                target.focus({{preventScroll: true}});
+                aligned = true;
+              }}
               const alignLessonArea = () => {{
                 const main = window.parent.document.querySelector('[data-testid="stMain"]');
                 const topOffset = 88;
                 if (main) {{
-                  const top = main.scrollTop + group.getBoundingClientRect().top - topOffset;
-                  main.scrollTo({{top: Math.max(0, top), behavior: 'smooth'}});
+                  const top = main.scrollTop + group.getBoundingClientRect().top - main.getBoundingClientRect().top - topOffset;
+                  main.scrollTo({{top: Math.max(0, top), behavior: 'instant'}});
                 }} else {{
                   const top = window.parent.scrollY + group.getBoundingClientRect().top - topOffset;
-                  window.parent.scrollTo({{top: Math.max(0, top), behavior: 'smooth'}});
+                  window.parent.scrollTo({{top: Math.max(0, top), behavior: 'instant'}});
                 }}
               }};
-              window.setTimeout(alignLessonArea, 80);
-              window.setTimeout(alignLessonArea, 350);
-              return;
+              alignLessonArea();
             }}
             if (attempts++ < 20) window.setTimeout(selectTab, 100);
           }};
+          // Keep the heading aligned while Streamlit replaces the previous stage.
+          // Stop immediately if the learner starts scrolling or interacting.
+          const stopAlignment = () => {{ attempts = 21; }};
+          ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(eventName => {{
+            window.parent.document.addEventListener(eventName, stopAlignment, {{once: true, passive: true}});
+          }});
           selectTab();
         }})();
         </script>
@@ -450,6 +509,9 @@ def complete_activity2(unit_number):
         st.session_state.total_xp = st.session_state.get("total_xp", 0) + 20
         save_progress()
     st.session_state[f"activity2_submission_notice_{unit_number}"] = True
+    if unit_number == 1:
+        st.session_state.unit1_activity2_reviewing = False
+        st.session_state["_unit1_lesson_tabs"] = interface_text("● 활동 2  ✓", "● Activity 2  ✓")
 
 
 def restart_review_routine(unit_number):
@@ -1690,11 +1752,18 @@ def sentence_builder():
     completed_sentence_count = len(missions) if st.session_state.builder_finished else min(
         st.session_state.builder_index + (1 if st.session_state.builder_completed else 0), len(missions)
     )
+    current_sentence_step = len(missions) if st.session_state.builder_finished else min(
+        st.session_state.builder_index + 1, len(missions)
+    )
     with st.container(border=True):
         st.markdown(
             f'<div class="eyebrow">{interface_text("미션", "Mission")} {st.session_state.builder_index + 1:02d} · {interface_text("문장 조합", "sentence build")}</div>'
-            f'<h2>“{current_unit["goal"]}” <span class="sentence-progress-count">({completed_sentence_count}/{len(missions)})</span></h2>',
+            f'<h2>“{current_unit["goal"]}”</h2>',
             unsafe_allow_html=True,
+        )
+        st.progress(
+            current_sentence_step / len(missions),
+            text=f"{interface_text('문장 조합 진행', 'Sentence-building progress')} · {current_sentence_step}/{len(missions)}",
         )
         current = " ".join(st.session_state.builder_answer) or "단어를 아래에서 선택하세요"
         st.markdown(f'<div style="min-height:58px;padding:16px;background:#202020;border:1px dashed #555;border-radius:12px;font-size:19px">{current}</div>', unsafe_allow_html=True)
@@ -1747,7 +1816,12 @@ def sentence_builder():
                 st.rerun()
     if st.session_state.builder_finished:
         st.info(f"{len(missions)}개 문장을 모두 완성했습니다. 오늘의 문장 조합 학습이 끝났어요.", icon=":material/check_circle:")
-        lesson_button("학습 홈으로 돌아가기", type="primary", on_click=navigate_to_page, args=("내 학습",))
+        lesson_button(
+            "1단원 학습 마무리 보기" if current_unit["number"] == 1 else "학습 홈으로 돌아가기",
+            type="primary",
+            on_click=return_to_unit1_wrap_up if current_unit["number"] == 1 else navigate_to_page,
+            args=() if current_unit["number"] == 1 else ("내 학습",),
+        )
 
 
 def sync_mode():
@@ -1863,6 +1937,9 @@ def inject_css():
         .unit-learning-intro { color:#c8c6c1; font-size:15px; font-weight:500; line-height:1.6; margin-bottom:18px; }
         .unit-step-summary { color:#d9f59a; font-size:14px; font-weight:600; line-height:1.45; letter-spacing:-.3px; white-space:nowrap; }
         .sentence-progress-count { color:var(--lime); font-size:18px; font-weight:800; letter-spacing:-.4px; white-space:nowrap; }
+        .sentence-progress-label { display:flex; justify-content:space-between; align-items:center; margin-top:14px; color:var(--muted); font-size:13px; font-weight:600; }
+        .sentence-progress-track { height:6px; margin-top:6px; background:#292929; border-radius:9px; overflow:hidden; }
+        .sentence-progress-track > div { height:100%; background:var(--lime); border-radius:9px; transition:width .25s ease; }
         div[class*="st-key-unit2_sino_number_"] button {
             border-color:#82c91e !important; color:#b7ef58 !important; background:rgba(130,201,30,.10) !important;
         }
@@ -1903,6 +1980,47 @@ def inject_css():
         .tiny { color:#a3a3a3; font-size:14px; }
         div[data-testid="stButton"] button { border-radius:10px; border:1px solid #3d3d3d; background:#202020; color:#f4f4f4; font-size:16px; font-weight:600; min-height:44px; }
         div[data-testid="stButton"] button:hover { border-color:var(--lime); color:var(--lime); }
+        [class*="st-key-unit1_action_row_"] .unit1-summary-link,
+        [class*="st-key-unit1_action_row_"] div[data-testid="stButton"] button,
+        [class*="st-key-unit1_action_row_"] div[data-testid="stAlertContainer"] {
+            box-sizing:border-box; width:100%; height:44px; min-height:44px;
+            padding:6px 12px; border-radius:10px; display:flex;
+            align-items:center; justify-content:center; text-align:center;
+        }
+        [class*="st-key-unit1_action_row_"] div[data-testid="stButton"] button p,
+        [class*="st-key-unit1_action_row_"] div[data-testid="stAlertContainer"] p {
+            font-size:16px !important; font-weight:600 !important;
+            line-height:1.4 !important; margin:0 !important;
+        }
+        [class*="st-key-unit1_action_row_"] a.unit1-summary-link {
+            background:var(--lime); color:#111 !important; text-decoration:none;
+            font-size:16px; font-weight:600; line-height:1.4;
+        }
+        [class*="st-key-unit1_action_row_"] a.unit1-summary-link:focus-visible {
+            outline:2px solid var(--lime); outline-offset:3px;
+        }
+        div.st-key-unit1_wrap_up_guidance {
+            background:linear-gradient(135deg, rgba(201,246,109,.22), rgba(201,246,109,.08));
+            border:1px solid var(--lime); border-radius:12px; padding:14px 18px;
+            margin-top:12px; min-height:52px; box-sizing:border-box;
+            display:flex; align-items:center;
+        }
+        div.st-key-unit1_wrap_up_guidance [data-testid="stMarkdownContainer"] {
+            width:100%; display:flex; align-items:center;
+        }
+        div.st-key-unit1_wrap_up_guidance p {
+            color:var(--ink) !important; font-size:16px !important;
+            font-weight:700 !important; line-height:1.55 !important;
+            margin:0 !important;
+        }
+        [class*="st-key-unit1_action_row_"] [data-testid="stAlert"] {
+            box-sizing:border-box; width:100%; height:44px; min-height:44px;
+            margin:0 !important; align-self:center; display:flex; align-items:center;
+        }
+        [class*="st-key-unit1_action_row_"] [data-testid="stAlert"] > div {
+            width:100%; display:flex; align-items:center;
+        }
+        #unit-summary-heading { scroll-margin-top:72px; }
         div[data-testid="stButton"] button[kind="primary"] { background:var(--lime); color:#111; border:0; }
         [class*="st-key-vocab_navigation"] button { background:#15191e !important; border:1px solid #596575 !important; color:#c8d0da !important; min-height:34px !important; font-size:13px !important; }
         [class*="st-key-vocab_navigation"] button:hover:not(:disabled) { border-color:#aeb9c8 !important; color:#ffffff !important; }
@@ -6477,11 +6595,13 @@ def dashboard():
                             "다음: 어휘와 표현 학습하기 →",
                             "Next: Learn vocabulary and expressions →",
                         )
-                        st.markdown(
-                            f'<a href="#unit1-vocabulary-step" style="display:block;padding:.62rem .85rem;'
-                            f'border-radius:.5rem;text-align:center;text-decoration:none;font-weight:700;'
-                            f'background:#c9f66d;color:#111;">{next_label}</a>',
-                            unsafe_allow_html=True,
+                        lesson_button(
+                            next_label,
+                            key="unit1_intro_continue_vocabulary",
+                            type="primary",
+                            width="stretch",
+                            on_click=request_lesson_tab,
+                            args=(1, 0),
                         )
                 st.caption(interface_text(
                     "여기에서는 자기소개 순서와 예문을 확인합니다. 직접 자기소개를 만드는 활동은 ‘활동 2’에서 진행합니다.",
@@ -6552,6 +6672,12 @@ def dashboard():
         f"{{ color:{active_tab_color} !important; font-weight:800 !important; }}"
         if active_number is not None else ""
     )
+    if current_unit["number"] == 1:
+        active_rule = (
+            'div[data-testid="stTabs"] [data-baseweb="tab-list"] [role="tab"][aria-selected="true"], '
+            'div[data-testid="stTabs"] [data-baseweb="tab-list"] [role="tab"][aria-selected="true"] * '
+            f"{{ color:{active_tab_color} !important; font-weight:800 !important; }}"
+        )
     locked_css = ",\n".join(
         f'div[data-testid="stTabs"] [data-baseweb="tab-list"] [role="tab"]:nth-of-type({index + 1})'
         for index, unlocked in enumerate(unlocked_steps) if not unlocked
@@ -6587,8 +6713,13 @@ def dashboard():
         default=tab_labels[active_step if active_step is not None else 4],
         **unit1_tab_options,
     )
-    if requested_tab_index is not None:
-        render_lesson_tab_navigation(requested_tab_index)
+    # 후속 요약·복습은 활동 2 화면에서만 공개합니다. 완료 기록이 남아 있어도
+    # 1~4단계를 다시 보고 있을 때는 안내문만 표시해야 합니다.
+    selected_lesson_step = active_step if active_step is not None else 4
+    if current_unit["number"] == 1:
+        selected_lesson_tab = st.session_state.get("_unit1_lesson_tabs")
+        if selected_lesson_tab in tab_labels:
+            selected_lesson_step = tab_labels.index(selected_lesson_tab)
     with vocab_tab:
         with st.container(border=True):
             if current_unit["number"] == 1:
@@ -7439,14 +7570,13 @@ def dashboard():
                             and st.session_state.get("unit1_grammar1_final_passed", False)
                             and unit1_final_answer_current
                         )
-                        grammar1_finished = bool(st.session_state.get("grammar1_done_1", False))
+                        grammar1_finished = get_unit_completion_steps(1)[1]
                         grammar1_reviewing = bool(st.session_state.get("unit1_grammar1_reviewing", False))
                         if grammar1_finished and not grammar1_reviewing:
-                            render_learning_success(
+                            replay_column, next_column = render_unit1_action_columns(
                                 interface_text("문법 1 학습을 완료했어요 ✓", "You completed Grammar 1 ✓"),
-                                icon=":material/check_circle:",
+                                stage="grammar1",
                             )
-                            replay_column, next_column = st.columns([1, 1.25])
                             with replay_column:
                                 lesson_button(
                                     interface_text("문법 1 다시 학습하기", "Practice Grammar 1 again"),
@@ -7477,7 +7607,7 @@ def dashboard():
                                 if missing_grammar1_tasks
                                 else interface_text("문법 1 학습을 완료 처리합니다.", "Mark Grammar 1 as complete.")
                             )
-                            replay_column, complete_column = st.columns([1, 1.25])
+                            replay_column, complete_column = render_unit1_action_columns(stage="grammar1")
                             with replay_column:
                                 lesson_button(
                                     interface_text("문법 1 다시 학습하기", "Practice Grammar 1 again"),
@@ -7969,7 +8099,7 @@ def dashboard():
                 )
                 render_unit1_stage_actions(
                     "activity1", unit1_activity1_ready,
-                    interface_text("1번의 두 답을 맞히고 정답을 확인해 주세요.", "Answer both questions in Exercise 1 correctly and check your answers.") if not unit1_activity1_ready else None,
+                    interface_text("1번의 두 답을 맞히고 정답을 확인한 뒤, 2번의 이름과 직업을 선택해 주세요.", "Answer both questions in Exercise 1 correctly and check your answers, then select a name and occupation in Exercise 2.") if not unit1_activity1_ready else None,
                 )
             elif current_unit["number"] == 2:
                 st.space("small")
@@ -8414,12 +8544,13 @@ def dashboard():
             if current_unit["number"] == 1:
                 activity2_reviewing = st.session_state.get("unit1_activity2_reviewing", False)
                 activity2_finished = activity2_completed and not activity2_reviewing
-                if activity2_finished:
-                    render_learning_success(
-                        interface_text("활동 2 학습을 완료했어요 ✓", "You completed Activity 2 ✓"),
-                        icon=":material/check_circle:",
-                    )
-                replay_column, complete_column = st.columns([1, 1.25])
+                replay_column, complete_column = render_unit1_action_columns(
+                    interface_text(
+                        "활동 2 학습을 완료했어요 ✓",
+                        "You completed Activity 2 ✓",
+                    ) if activity2_completed else None,
+                    stage="activity2",
+                )
                 with replay_column:
                     lesson_button(
                         interface_text("활동 2 다시 학습하기", "Practice Activity 2 again"),
@@ -8429,12 +8560,13 @@ def dashboard():
                     )
                 with complete_column:
                     if activity2_finished:
-                        lesson_button(
-                            interface_text("활동 2 학습 완료 ✓", "Activity 2 complete ✓"),
-                            key="unit1_activity2_completed",
-                            type="secondary",
-                            disabled=True,
-                            width="stretch",
+                        summary_link_label = interface_text(
+                            "아래 단원 정리·복습으로 마무리하세요",
+                            "Finish with the summary and review below",
+                        )
+                        st.markdown(
+                            f'<a class="unit1-summary-link" href="#unit-summary-heading" target="_self">{html.escape(summary_link_label)}</a>',
+                            unsafe_allow_html=True,
                         )
                     else:
                         lesson_button(
@@ -8459,7 +8591,11 @@ def dashboard():
                 if st.session_state.get(f"activity2_submission_notice_{current_unit['number']}", False):
                     render_learning_success(interface_text("제출했어요. 오늘의 5단계 학습을 완료했습니다! +20 XP", "Submitted. You completed today’s five learning steps! +20 XP"), icon=":material/check_circle:")
     st.space("medium")
-    post_unit_unlocked = REVIEW_MODE or unit_completed
+    if requested_tab_index is not None:
+        render_lesson_tab_navigation(requested_tab_index)
+    # 단원 핵심 정리와 3단계 복습은 활동 2를 완료한 뒤에만 공개합니다.
+    # 검수 모드에서도 학습자 화면의 후속 내용은 잠금 규칙을 따릅니다.
+    post_unit_unlocked = unit_completed and selected_lesson_step >= 4
     if not post_unit_unlocked:
         locked_summary, locked_review = st.columns(2)
         with locked_summary:
@@ -8473,18 +8609,29 @@ def dashboard():
             with st.container(border=True):
                 st.markdown(interface_text("### 오늘의 3단계 복습 🔒", "### Today’s 3-Step Review 🔒"))
                 st.caption(interface_text(
+                    "단원 마무리 · 활동 2를 완료하면 어휘·문법·문장 조합 복습이 열립니다."
+                    if current_unit["number"] == 1 else
                     "선택 학습 · 활동 2를 완료하면 어휘·문법·문장 조합 복습이 열립니다.",
+                    "Unit wrap-up · Complete Activity 2 to unlock vocabulary, grammar, and sentence-building review."
+                    if current_unit["number"] == 1 else
                     "Optional practice · Complete Activity 2 to unlock vocabulary, grammar, and sentence-building review.",
                 ))
         render_learning_info(
             interface_text(
+                "활동 2를 완료하면 단원 핵심 정리와 3단계 복습 내용을 볼 수 있어요."
+                if current_unit["number"] == 1 else
                 "활동 2를 완료하면 단원 핵심 정리와 선택 복습 내용을 볼 수 있어요.",
+                "Complete Activity 2 to view the unit summary and three-step review."
+                if current_unit["number"] == 1 else
                 "Complete Activity 2 to view the Unit Review and optional practice.",
             ),
             icon=":material/lock:",
         )
         return
-    st.markdown(interface_text("## 단원 핵심 정리", "## Unit Review"))
+    st.header(
+        interface_text("단원 핵심 정리", "Unit Review"),
+        anchor="unit-summary-heading",
+    )
     st.caption(interface_text(
         "1~5단계에서 배운 두 문법과 대표 문장을 마지막으로 확인하세요.",
         "Review the two grammar points and the key sentence from Steps 1–5.",
@@ -8504,8 +8651,18 @@ def dashboard():
     )
     st.space("medium")
     review_heading = interface_text("오늘의 3단계 복습 루틴", "Today’s 3-Step Review")
+    if current_unit["number"] == 1:
+        st.checkbox(
+            interface_text("단원 핵심 정리를 확인했어요", "I reviewed the unit summary"),
+            key="unit1_summary_confirmed",
+            disabled=bool(st.session_state.get("unit1_wrap_up_completed", False)),
+        )
     review_description = interface_text(
+        "어휘 → 문법 → 문장 조합 순서로 복습하고 1단원 학습을 마무리해 보세요."
+        if current_unit["number"] == 1 else
         f'이것은 단원 학습 5단계와 별개의 복습 과정입니다. {current_unit["number"]}단원 5단계 학습을 모두 마친 뒤, 배운 내용을 짧게 다시 연습합니다.',
+        "Review vocabulary, grammar, and sentence building in order to finish Unit 1."
+        if current_unit["number"] == 1 else
         f'This review is separate from the five unit-learning steps. After completing all five steps in Unit {current_unit["number"]}, briefly practice what you have learned.',
     )
     st.markdown(f'<div class="eyebrow">After unit completion · review</div><h2>{review_heading}</h2><p class="sub">{review_description}</p>', unsafe_allow_html=True)
@@ -8574,6 +8731,51 @@ def dashboard():
             on_click=set_session_state_value,
             args=("go_builder",),
         )
+    if current_unit["number"] == 1:
+        st.divider()
+        if st.session_state.get("unit1_wrap_up_completed", False):
+            st.markdown('<div id="unit1-wrap-up-complete"></div>', unsafe_allow_html=True)
+            render_learning_success(
+                interface_text(
+                    "수고했어요! 단원 핵심 정리와 3단계 복습까지 모두 마쳤어요. 1단원 학습을 성공적으로 마무리했어요 ✓",
+                    "Well done! You completed the unit summary and all three review steps. Unit 1 is successfully complete ✓",
+                ),
+                icon=":material/check_circle:",
+            )
+            if st.session_state.pop("scroll_unit1_wrap_up", False):
+                st.iframe(
+                    """
+                    <script>
+                    (() => {
+                      const doc = window.parent.document;
+                      const target = doc.getElementById('unit1-wrap-up-complete');
+                      const main = doc.querySelector('[data-testid="stMain"]');
+                      if (!target) return;
+                      const top = target.getBoundingClientRect().top;
+                      if (main) {
+                        main.scrollTo({top: Math.max(0, main.scrollTop + top - main.getBoundingClientRect().top - 72), behavior: 'instant'});
+                      } else {
+                        window.parent.scrollTo({top: Math.max(0, window.parent.scrollY + top - 72), behavior: 'instant'});
+                      }
+                    })();
+                    </script>
+                    """,
+                    height=1,
+                )
+        elif unit1_wrap_up_ready():
+            lesson_button(
+                interface_text("1단원 학습 마무리하기", "Finish Unit 1"),
+                key="unit1_wrap_up_finish", type="primary", width="stretch",
+                on_click=complete_unit1_wrap_up,
+            )
+        else:
+            with st.container(border=True, key="unit1_wrap_up_guidance"):
+                st.markdown(
+                    interface_text(
+                        "✨ 마지막 정리 단계예요. 단원 핵심 정리와 3단계 복습을 완료하면 1단원 학습을 마무리할 수 있어요.",
+                        "✨ This is the final wrap-up. Complete the unit summary and three-step review to finish Unit 1.",
+                    )
+                )
     st.caption(f"교재 기준: {TEXTBOOK_SOURCE} · {TEXTBOOK_EDITION}. 원문 문장과 삽화는 복제하지 않고 자체 연습 콘텐츠로 제공합니다.")
     with st.expander("세종한국어 1A 전체 단원 매핑 보기"):
         for unit in TEXTBOOK_UNITS:
