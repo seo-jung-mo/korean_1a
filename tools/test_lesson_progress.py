@@ -135,6 +135,161 @@ class LessonAppTests(unittest.TestCase):
         menu.select(menu.options[unit - 1]).run()
         self.assert_no_errors(app)
 
+    def test_unit2_number_reading_counts_unique_clicks_and_resumes(self):
+        app = self.app(2)
+
+        def assert_count(app, count):
+            self.assert_no_errors(app)
+            progress = app.tabs[0].get("progress")[0]
+            self.assertEqual(progress.proto.text, f"1. 숫자를 소리 내어 읽어 보세요. ({count}/30)")
+            self.assertEqual(progress.value, int(count / 30 * 100))
+
+        assert_count(app, 0)
+        app.button(key="unit2_sino_number_0").click().run()
+        assert_count(app, 1)
+        app.button(key="unit2_sino_number_0").click().run()
+        assert_count(app, 1)
+        app.button(key="unit2_sino_number_10").click().run()
+        assert_count(app, 2)
+        resumed = self.app(2)
+        assert_count(resumed, 2)
+        numbers = [b.key.removeprefix("unit2_sino_number_") for b in resumed.button
+                   if b.key and b.key.startswith("unit2_sino_number_")]
+        resumed.session_state["unit2_sino_read_numbers"] = [n for n in numbers if n != "1000"]
+        resumed.run()
+        resumed.button(key="unit2_sino_number_1000").click().run()
+        assert_count(resumed, 30)
+        resumed.button(key="unit2_vocab_replay").click().run()
+        assert_count(resumed, 0)
+        assert_count(self.app(2), 0)
+
+    def test_unit2_number_examples_count_separately_and_resume(self):
+        app = self.app(2)
+
+        def assert_count(app, count):
+            self.assert_no_errors(app)
+            progress = app.tabs[0].get("progress")[1]
+            self.assertEqual(progress.proto.text, f"2. 숫자가 들어간 정보를 읽어 보세요. ({count}/6)")
+            self.assertEqual(progress.value, int(count / 6 * 100))
+
+        assert_count(app, 0)
+        app.button(key="unit2_number_example_4층").click().run()
+        assert_count(app, 1)
+        app.button(key="unit2_number_example_4층").click().run()
+        assert_count(app, 1)
+        app.button(key="unit2_sino_number_0").click().run()
+        assert_count(app, 1)
+        resumed = self.app(2)
+        assert_count(resumed, 1)
+        for count, expression in enumerate(("5월 3일", "35쪽", "320번", "405호", "800원"), 2):
+            resumed.button(key=f"unit2_number_example_{expression}").click().run()
+            assert_count(resumed, count)
+        self.assertEqual(resumed.session_state["unit2_sino_read_numbers"], ["0"])
+        resumed.button(key="unit2_vocab_replay").click().run()
+        assert_count(resumed, 0)
+        assert_count(self.app(2), 0)
+
+    def test_unit2_explicit_completion_navigation_replay_and_wrap_up(self):
+        app = self.app(2)
+        self.assert_no_errors(app)
+        stages = ("vocab", "grammar1", "grammar2", "activity1", "activity2")
+        for stage in stages:
+            self.assertTrue(app.button(key=f"unit2_{stage}_complete").disabled)
+            self.assertIsNotNone(app.button(key=f"unit2_{stage}_replay"))
+        self.assertNotIn("grammar1_done_2", [item.key for item in app.checkbox])
+        self.assertNotIn("grammar2_done_2", [item.key for item in app.checkbox])
+
+        vocab_buttons = [b for b in app.button if b.key and b.key.startswith("vocab_select_2_")]
+        app.session_state["vocab_read_cards_2"] = list(range(len(vocab_buttons)))
+        for i, value in enumerate(("140번", "5월", "800원", "405호")):
+            app.selectbox(key=f"unit2_visual_number_{i}").select(value)
+        app.run()
+        self.assertFalse(app.button(key="unit2_vocab_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"].get(2, 0), 0)
+        app.button(key="unit2_vocab_complete").click().run()
+        self.assertEqual(app.session_state["_lesson_history"][2], 1)
+        self.assertIn("어휘와 표현", app.session_state["_unit2_lesson_tabs"])
+        app.button(key="unit2_vocab_next").click().run()
+        self.assertIn("문법 1", app.session_state["_unit2_lesson_tabs"])
+
+        for i in range(4):
+            radio = app.radio(key=f"unit2_g1_picture_answer_{i}")
+            radio.set_value(radio.options[0])
+        app.run()
+        app.button(key="unit2_g1_picture_check").click().run()
+        for i, answer in enumerate(("가", "가", "가", "이")):
+            app.radio(key=f"grammar_quiz_choice_2_{i}").set_value(answer).run()
+            app.button(key=f"grammar_check_2_{i}").click().run()
+            if i < 3:
+                self.assertTrue(app.button(key="unit2_grammar1_complete").disabled)
+                app.button(key=f"grammar_next_2_{i}").click().run()
+        self.assertFalse(app.button(key="unit2_grammar1_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"][2], 1)
+        app.button(key="unit2_grammar1_complete").click().run()
+        self.assertEqual(app.session_state["_lesson_history"][2], 2)
+        app.button(key="unit2_grammar1_next").click().run()
+        self.assertIn("문법 2", app.session_state["_unit2_lesson_tabs"])
+
+        for i in range(4):
+            radio = app.radio(key=f"unit2_negative_{i}")
+            radio.set_value(radio.options[0])
+        for i in range(3):
+            radio = app.radio(key=f"unit2_negative_dialogue_{i}")
+            radio.set_value(radio.options[0])
+        app.run()
+        app.button(key="unit2_negative_check").click().run()
+        self.assertFalse(app.button(key="unit2_grammar2_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"][2], 2)
+        app.button(key="unit2_grammar2_complete").click().run()
+        app.button(key="unit2_grammar2_next").click().run()
+        self.assertIn("활동 1", app.session_state["_unit2_lesson_tabs"])
+
+        app.selectbox(key="unit2_activity1_topic").select("전화번호")
+        app.selectbox(key="unit2_activity1_phone").select("010-1359-6783").run()
+        app.button(key="unit2_activity1_check").click().run()
+        radio = app.radio(key="unit2_activity1_confirmation")
+        radio.set_value(radio.options[0]).run()
+        app.button(key="unit2_activity1_confirmation_check").click().run()
+        self.assertFalse(app.button(key="unit2_activity1_complete").disabled)
+        self.assertEqual(app.session_state["_lesson_history"][2], 3)
+        app.button(key="unit2_activity1_complete").click().run()
+        app.button(key="unit2_activity1_next").click().run()
+        self.assertIn("활동 2", app.session_state["_unit2_lesson_tabs"])
+
+        for i in range(2):
+            select = app.selectbox(key=f"unit2_activity2_place_phone_{i}")
+            select.select(select.options[i + 1])
+        app.run()
+        app.button(key="unit2_activity2_place_check").click().run()
+        app.text_input(key="unit2_contact_name_0").set_value("민")
+        app.text_input(key="unit2_contact_phone_0").set_value("010-1234-5678")
+        app.text_input(key="unit2_contact_email_name_0").set_value("min").run()
+        self.assertFalse(app.button(key="unit2_activity2_complete").disabled)
+        app.button(key="unit2_activity2_complete").click().run()
+        self.assert_no_errors(app)
+        self.assertEqual(app.session_state["_lesson_history"][2], 5)
+        self.assertTrue(any('href="#unit-summary-heading"' in m.value for m in app.markdown))
+        self.assertNotIn("unit2_wrap_up_finish", [b.key for b in app.button])
+        app.checkbox(key="unit2_summary_confirmed").check()
+        for step in ("vocab", "grammar", "sentence"):
+            app.session_state[f"review_{step}_done_2"] = True
+        app.run()
+        app.button(key="unit2_wrap_up_finish").click().run()
+        self.assertTrue(app.session_state["unit2_wrap_up_completed"])
+        xp = app.session_state["total_xp"]
+        for stage in stages:
+            app.button(key=f"unit2_{stage}_replay").click().run()
+            self.assert_no_errors(app)
+            self.assertTrue(app.button(key=f"unit2_{stage}_complete").disabled)
+            self.assertEqual(app.session_state["_lesson_history"][2], 5)
+            self.assertEqual(app.session_state["total_xp"], xp)
+        self.assertEqual(app.text_input(key="unit2_contact_name_0").value, "")
+        resumed = self.app(2)
+        self.assert_no_errors(resumed)
+        self.assertEqual(resumed.session_state["_lesson_history"][2], 5)
+        self.assertTrue(resumed.button(key="unit2_activity2_complete").disabled)
+        self.assertTrue(resumed.session_state["unit2_wrap_up_completed"])
+
     def test_unit1_completes_only_after_visible_prerequisites_and_resumes(self):
         app = self.app(1)
         self.assertTrue(app.button(key="unit1_intro_reading_continue_locked").disabled)
