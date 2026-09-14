@@ -10197,14 +10197,15 @@ def dashboard():
               const doc = window.parent.document;
               let attempts = 0;
               const align = () => {
-                const heading = doc.getElementById('unit-summary-heading');
-                if (!heading && attempts++ < 40) {
+                const heading = doc.getElementById('unit-summary-heading') || doc.querySelector('[id="unit-summary-heading"]');
+                if (!heading && attempts++ < 80) {
                   window.setTimeout(align, 100);
                   return;
                 }
                 if (!heading) return;
                 heading.style.scrollMarginTop = '88px';
                 heading.scrollIntoView({block: 'start', behavior: 'instant'});
+                window.setTimeout(() => heading.scrollIntoView({block: 'start', behavior: 'instant'}), 250);
               };
               align();
             })();
