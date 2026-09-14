@@ -8848,16 +8848,17 @@ def dashboard():
                       const doc = window.parent.document;
                       let attempts = 0;
                       const align = () => {
-                        const heading = [...doc.querySelectorAll('h3')].find(el =>
-                          el.getClientRects().length && /^(문법 1 마무리 확인|Final Grammar 1 check)$/.test(el.textContent.trim())
+                        const heading = [...doc.querySelectorAll('h3, h2')].find(el =>
+                          el.getClientRects().length && /문법 1 마무리 확인|Final Grammar 1 check/.test(el.textContent.trim())
                         );
-                        if (!heading && attempts++ < 40) {
+                        if (!heading && attempts++ < 80) {
                           window.setTimeout(align, 100);
                           return;
                         }
                         if (!heading) return;
                         heading.style.scrollMarginTop = '88px';
                         heading.scrollIntoView({block: 'start', behavior: 'instant'});
+                        window.setTimeout(() => heading.scrollIntoView({block: 'start', behavior: 'instant'}), 250);
                       };
                       align();
                     })();
