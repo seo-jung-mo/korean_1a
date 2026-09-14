@@ -553,6 +553,52 @@ class LessonAppTests(unittest.TestCase):
                 self.assertEqual(len(app.tabs), 5)
                 self.assertTrue(all("✓" in tab.label for tab in app.tabs))
 
+    def test_later_units_have_reading_and_sequence_introductions(self):
+        app = self.app(6)
+        for unit in range(6, 11):
+            with self.subTest(unit=unit):
+                if unit != 6:
+                    self.select_unit(app, unit)
+                self.assert_no_errors(app)
+                self.assertFalse(app.button(key=f"unit{unit}_read_advance").disabled)
+                self.assertTrue(app.button(key=f"unit{unit}_intro_sequence_0").disabled)
+                self.assertTrue(app.button(key=f"unit{unit}_intro_continue_vocabulary").disabled)
+                for stage in ("vocab", "grammar1", "grammar2", "activity1", "activity2"):
+                    self.assertIsNotNone(app.button(key=f"unit{unit}_{stage}_replay"))
+                    self.assertIsNotNone(app.button(key=f"unit{unit}_{stage}_next"))
+
+    def test_unit6_introduction_advances_to_vocabulary(self):
+        app = self.app(6)
+        for _ in range(12):
+            app.button(key="unit6_read_advance").click().run()
+            self.assert_no_errors(app)
+        self.assertEqual(app.session_state["unit6_read_round"], 3)
+        app.button(key="unit6_intro_reading_continue").click().run()
+        self.assert_no_errors(app)
+        for index in range(4):
+            app.button(key=f"unit6_intro_sequence_{index}").click().run()
+            self.assert_no_errors(app)
+        self.assertFalse(app.button(key="unit6_intro_continue_vocabulary").disabled)
+        app.button(key="unit6_intro_continue_vocabulary").click().run()
+        self.assert_no_errors(app)
+        self.assertTrue(app.session_state["_unit6_lesson_tabs"].startswith("● 어휘와 표현"))
+
+    def test_later_unit_replay_keeps_earned_completion_and_locks_next(self):
+        LessonProgressStore(self.path).save(
+            {unit: 5 for unit in range(1, 7)},
+            {"selected_unit_number": 6, "vocab_read_cards_6": [0, 1]},
+        )
+        app = self.app(6)
+        self.assertFalse(app.button(key="unit6_vocab_next").disabled)
+        app.button(key="unit6_vocab_next").click().run()
+        self.assert_no_errors(app)
+        self.assertTrue(app.session_state["_unit6_lesson_tabs"].startswith("● 문법 1"))
+        app.button(key="unit6_vocab_replay").click().run()
+        self.assert_no_errors(app)
+        self.assertTrue(app.button(key="unit6_vocab_next").disabled)
+        self.assertEqual(app.session_state["vocab_read_cards_6"], [])
+        self.assertEqual(LessonProgressStore(self.path).load()[0][6], 5)
+
     def test_dependent_answer_options_remain_valid(self):
         app = self.app(10)
         place = app.selectbox(key="unit10_a2_place")

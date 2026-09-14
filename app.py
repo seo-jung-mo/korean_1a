@@ -1,4 +1,4 @@
-import random
+﻿import random
 import json
 import html
 import os
@@ -371,7 +371,10 @@ def render_intro_reading_controls(unit_number, current_round, line_count, *, com
             3: interface_text("다음: 물건·위치 순서 확인하기 →", "Next: Review the object-location order →"),
             4: interface_text("다음: 오늘 할 일 순서 확인하기 →", "Next: Review the activity dialogue order →"),
             5: interface_text("다음: 장보기 대화 순서 확인하기 →", "Next: Review the shopping dialogue order →"),
-            }.get(unit_number, interface_text("다음 단계로 이동하기 →", "Continue to the next step →"))
+            }.get(unit_number, interface_text(
+                f"다음: {LATER_UNIT_INTRODUCTIONS[unit_number]['sequence'][0]} 확인하기 →",
+                f"Next: Review the {LATER_UNIT_INTRODUCTIONS[unit_number]['sequence'][1]} →",
+            ) if unit_number in LATER_UNIT_INTRODUCTIONS else interface_text("다음 단계로 이동하기 →", "Continue to the next step →"))
             if completed and completed_actions:
                 lesson_button(label, key=f"unit{unit_number}_intro_reading_continue", type="primary", width="stretch",
                               on_click=set_session_state_value,
@@ -399,8 +402,10 @@ def render_intro_sequence_success(unit_number):
         message = interface_text("물건과 위치 순서를 모두 확인했어요 ✓", "You checked the full object and location order ✓")
     elif unit_number == 4:
         message = interface_text("오늘 할 일 대화 순서를 모두 확인했어요 ✓", "You checked the full activity dialogue order ✓")
-    else:
+    elif unit_number == 5:
         message = interface_text("장보기 대화 순서를 모두 확인했어요 ✓", "You checked the full shopping dialogue order ✓")
+    else:
+        message = interface_text("대화 순서를 모두 확인했어요 ✓", "You checked the full dialogue order ✓")
     render_learning_success(message, icon=":material/check_circle:")
 
 
@@ -415,8 +420,8 @@ def request_lesson_tab(unit_number, tab_index):
         st.session_state.unit3_intro_collapsed = tab_index > 0
     elif unit_number == 4:
         st.session_state.unit4_intro_collapsed = tab_index > 0
-    elif unit_number == 5:
-        st.session_state.unit5_intro_collapsed = tab_index > 0
+    elif 5 <= unit_number <= 10:
+        st.session_state[f"unit{unit_number}_intro_collapsed"] = tab_index > 0
 
 
 def collapse_unit2_intro_on_tab_change(first_tab_label):
@@ -440,6 +445,12 @@ def collapse_unit4_intro_on_tab_change(first_tab_label):
 def collapse_unit5_intro_on_tab_change(first_tab_label):
     st.session_state.unit5_intro_collapsed = (
         st.session_state.get("_unit5_lesson_tabs") != first_tab_label
+    )
+
+
+def collapse_later_unit_intro_on_tab_change(unit_number, first_tab_label):
+    st.session_state[f"unit{unit_number}_intro_collapsed"] = (
+        st.session_state.get(f"_unit{unit_number}_lesson_tabs") != first_tab_label
     )
 
 
@@ -795,9 +806,70 @@ def render_unit5_stage_actions(stage, ready, completion_help=None):
     render_stage_actions(5, stage, ready, completion_help)
 
 
-def reset_unit5_activity2_items():
-    st.session_state["unit5_a2_first"] = None
-    st.session_state["unit5_a2_second"] = None
+def restart_later_unit_stage(unit_number, stage):
+    """Clear one Unit 6–10 exercise while retaining earned completion history."""
+    short_name = {"vocab": "vocab", "grammar1": "g1", "grammar2": "g2", "activity1": "a1", "activity2": "a2"}[stage]
+    prefixes = [f"unit{unit_number}_{stage}_", f"unit{unit_number}_{short_name}_"]
+    if stage == "vocab":
+        prefixes += [f"vocab_index_{unit_number}", f"vocab_read_cards_{unit_number}",
+                     f"vocab_revealed_{unit_number}", f"vocab_category_{unit_number}",
+                     f"vocab_done_{unit_number}"]
+    elif stage == "grammar1":
+        prefixes += [f"grammar1_index_{unit_number}", f"grammar1_result_{unit_number}",
+                     f"grammar1_checked_choice_{unit_number}_", f"grammar1_feedback_visible_{unit_number}_",
+                     f"grammar1_passed_{unit_number}_", f"grammar_quiz_choice_{unit_number}_",
+                     f"grammar1_done_{unit_number}"]
+    elif stage == "grammar2":
+        prefixes.append(f"grammar2_done_{unit_number}")
+    elif stage == "activity1":
+        prefixes.append(f"activity1_completed_{unit_number}")
+    else:
+        prefixes += [f"unit_completed_{unit_number}", f"activity2_submission_notice_{unit_number}"]
+    for key in list(st.session_state):
+        if any(key == prefix or key.startswith(prefix) for prefix in prefixes) and "rewarded" not in key:
+            st.session_state.pop(key, None)
+    if stage == "vocab":
+        st.session_state[f"vocab_index_{unit_number}"] = 0
+        st.session_state[f"vocab_read_cards_{unit_number}"] = []
+    elif stage == "grammar1":
+        st.session_state[f"grammar1_index_{unit_number}"] = 0
+    st.session_state[f"unit{unit_number}_{stage}_reviewing"] = True
+    request_lesson_tab(unit_number, UNIT2_STAGES.index(stage))
+
+
+def render_later_unit_stage_actions(unit_number, stage, completion_help=None):
+    """Match the replay and next-step controls used in Units 1–5."""
+    index = UNIT2_STAGES.index(stage)
+    titles = [("어휘와 표현", "Vocabulary & Expressions"), ("문법 1", "Grammar 1"),
+              ("문법 2", "Grammar 2"), ("활동 1", "Activity 1"), ("활동 2", "Activity 2")]
+    title = interface_text(*titles[index])
+    completion_key = (f"vocab_done_{unit_number}", f"grammar1_done_{unit_number}",
+                      f"grammar2_done_{unit_number}", f"activity1_completed_{unit_number}",
+                      f"unit_completed_{unit_number}")[index]
+    reviewing_key = f"unit{unit_number}_{stage}_reviewing"
+    if st.session_state.get(reviewing_key, False) and st.session_state.get(completion_key, False):
+        st.session_state[reviewing_key] = False
+    finished = get_unit_completion_steps(unit_number)[index] and not st.session_state.get(reviewing_key, False)
+    st.divider()
+    replay, action = render_unit1_action_columns(
+        interface_text(f"{title} 학습을 완료했어요 ✓", f"You completed {title} ✓") if finished else None,
+        stage=f"unit{unit_number}_{stage}",
+    )
+    with replay:
+        lesson_button(interface_text(f"{title} 다시 학습하기", f"Practice {title} again"),
+                      key=f"unit{unit_number}_{stage}_replay", width="stretch",
+                      on_click=restart_later_unit_stage, args=(unit_number, stage))
+    with action:
+        if index < 4:
+            next_title = interface_text(*titles[index + 1])
+            lesson_button(interface_text(f"다음: {next_title} 학습하기 →", f"Next: Learn {next_title} →"),
+                          key=f"unit{unit_number}_{stage}_next", type="primary", width="stretch",
+                          disabled=not finished, help=completion_help if not finished else None,
+                          on_click=request_lesson_tab, args=(unit_number, index + 1))
+        else:
+            lesson_button(interface_text("다음: 단원 정리·복습 →", "Next: Unit summary and review →"),
+                          key=f"unit{unit_number}_activity2_next", type="primary", width="stretch",
+                          disabled=not finished, on_click=open_unit_summary, args=(unit_number,))
 
 
 def continue_unit3_vocabulary():
@@ -830,10 +902,15 @@ def auto_complete_stage(unit_number, stage, ready):
         complete_unit4_stage(stage)
     elif unit_number == 5:
         complete_unit5_stage(stage)
+    elif 6 <= unit_number <= 10 and stage == "grammar1":
+        st.session_state[f"grammar1_done_{unit_number}"] = True
+        st.session_state[f"unit{unit_number}_grammar1_reviewing"] = False
     elif stage == "grammar1":
         complete_unit1_grammar1()
     elif stage == "activity2":
-        complete_activity2(1)
+        complete_activity2(unit_number)
+        if unit_number >= 6:
+            st.session_state[f"unit{unit_number}_activity2_reviewing"] = False
     else:
         complete_unit1_stage(stage)
     request_lesson_tab(unit_number, selected_index)
@@ -849,6 +926,16 @@ def render_stage_actions(unit_number, stage, ready, completion_help=None):
               ("문법 2", "Grammar 2"), ("활동 1", "Activity 1"), ("활동 2", "Activity 2")]
     title = interface_text(*titles[index])
     finished = get_unit_completion_steps(unit_number)[index] and not st.session_state.get(f"unit{unit_number}_{stage}_reviewing", False)
+    first_missing = None
+    if ready and not finished and index > 0:
+        steps = get_unit_completion_steps(unit_number)
+        first_missing = next((i for i in range(index) if not steps[i]), None)
+        if first_missing is not None:
+            prerequisite = interface_text(*titles[first_missing])
+            completion_help = interface_text(
+                f"현재 단계의 답은 완료되었습니다. 먼저 {prerequisite} 학습을 완료하면 다음 단계가 열립니다.",
+                f"Your answers for this step are complete. Finish {prerequisite} first to unlock the next step.",
+            )
     if unit_number == 1:
         replay_key, next_key = {
             "vocab": ("unit1_vocab_replay", "unit1_picture_continue_grammar1"),
@@ -883,10 +970,16 @@ def render_stage_actions(unit_number, stage, ready, completion_help=None):
     with action:
         if index < 4:
             next_title = interface_text(*titles[index + 1])
-            lesson_button(interface_text(f"다음: {next_title} 학습하기 →", f"Next: Learn {next_title} →"),
-                          key=next_key, type="primary", width="stretch",
-                          disabled=not finished, help=completion_help if not finished else None,
-                          on_click=request_lesson_tab, args=(unit_number, index + 1))
+            if first_missing is not None:
+                prerequisite = interface_text(*titles[first_missing])
+                lesson_button(interface_text(f"먼저 {prerequisite} 학습하기 →", f"Learn {prerequisite} first →"),
+                              key=next_key, type="primary", width="stretch",
+                              on_click=request_lesson_tab, args=(unit_number, first_missing))
+            else:
+                lesson_button(interface_text(f"다음: {next_title} 학습하기 →", f"Next: Learn {next_title} →"),
+                              key=next_key, type="primary", width="stretch",
+                              disabled=not finished, help=completion_help if not finished else None,
+                              on_click=request_lesson_tab, args=(unit_number, index + 1))
         else:
             label = interface_text("다음: 단원 정리·복습 →", "Next: Unit summary and review →")
             lesson_button(
@@ -969,6 +1062,10 @@ def render_unit1_action_columns(completion_message=None, *, stage):
 
 def render_unit1_stage_actions(stage, ready, completion_help=None):
     render_stage_actions(1, stage, ready, completion_help)
+
+
+def queue_grammar1_final_scroll(unit_number):
+    st.session_state[f"_scroll_grammar1_final_{unit_number}"] = True
 
 
 def render_lesson_tab_navigation(tab_index, align_heading=False):
@@ -1076,6 +1173,8 @@ def complete_activity2(unit_number):
         st.session_state[completion_key] = True
         st.session_state.total_xp = st.session_state.get("total_xp", 0) + 20
         save_progress()
+    elif unit_number >= 6 and st.session_state.get(f"unit{unit_number}_activity2_reviewing", False):
+        st.session_state[completion_key] = True
     st.session_state[f"activity2_submission_notice_{unit_number}"] = True
     if unit_number == 1:
         st.session_state.unit1_activity2_reviewing = False
@@ -2721,6 +2820,14 @@ def inject_css():
             opacity:1;
             border-color:#737373;
         }
+        .stApp [data-testid="stSelectbox"] [role="group"]:has(> input[role="combobox"]:is([value="선택하세요"], [value="Choose"], [value="Select one"], [value=""][placeholder="선택하세요"], [value=""][placeholder="Choose"], [value=""][placeholder="Select one"])) {
+            display:flex !important;
+            flex-direction:row-reverse !important;
+        }
+        .stApp [data-testid="stSelectbox"] [role="group"]:has(> input[role="combobox"]:is([value="선택하세요"], [value="Choose"], [value="Select one"], [value=""][placeholder="선택하세요"], [value=""][placeholder="Choose"], [value=""][placeholder="Select one"])) > input {
+            flex:1 1 auto !important;
+            min-width:0 !important;
+        }
         </style>
         """, unsafe_allow_html=True,
     )
@@ -3670,6 +3777,129 @@ def render_unit5_introduction_content():
     st.space("medium")
 
 
+LATER_UNIT_INTRODUCTIONS = {
+    6: {
+        "caption": ("과일 가게에서 물건과 수량을 묻고 답하는 대화예요.", "This dialogue asks for items and quantities at a fruit shop."),
+        "sequence": ("주문 대화 순서", "Order dialogue sequence"),
+        "lines": ["주인: 무엇을 드릴까요?", "손님: 사과 다섯 개 주세요.", "주인: 더 필요하세요?", "손님: 아니요. 얼마예요?"],
+        "steps": [("필요한 물건 묻기", "Ask what is needed", "무엇을 드릴까요?"), ("물건과 수량 말하기", "Say item and quantity", "사과 다섯 개 주세요."), ("추가 주문 묻기", "Ask about another item", "더 필요하세요?"), ("가격 묻기", "Ask the price", "얼마예요?")],
+    },
+    7: {
+        "caption": ("요일과 시간을 묻고 수업 일정을 말하는 대화예요.", "This dialogue asks about a weekday and class time."),
+        "sequence": ("수업 일정 대화 순서", "Class schedule dialogue sequence"),
+        "lines": ["가: 한국어 수업은 언제 해요?", "나: 목요일에 해요.", "가: 몇 시에 시작해요?", "나: 저녁 일곱 시에 시작해요."],
+        "steps": [("요일 묻기", "Ask the weekday", "언제 해요?"), ("요일 말하기", "Say the weekday", "목요일에 해요."), ("시간 묻기", "Ask the time", "몇 시에 시작해요?"), ("시간 말하기", "Say the time", "저녁 일곱 시에 시작해요.")],
+    },
+    8: {
+        "caption": ("날씨와 계절을 묻고 상태를 말하는 대화예요.", "This dialogue asks about weather and seasons."),
+        "sequence": ("날씨 대화 순서", "Weather dialogue sequence"),
+        "lines": ["가: 오늘 날씨가 어때요?", "나: 날씨가 더워요.", "가: 겨울에는 어때요?", "나: 겨울에는 추워요."],
+        "steps": [("오늘 날씨 묻기", "Ask today's weather", "날씨가 어때요?"), ("오늘 날씨 말하기", "Describe today's weather", "더워요."), ("계절 날씨 묻기", "Ask about a season", "겨울에는 어때요?"), ("계절 날씨 말하기", "Describe a season", "겨울에는 추워요.")],
+    },
+    9: {
+        "caption": ("어제 어디에서 무엇을 했는지 묻고 답하는 대화예요.", "This dialogue asks where someone went and what they did yesterday."),
+        "sequence": ("지난 활동 대화 순서", "Past activity dialogue sequence"),
+        "lines": ["가: 어제 어디에 갔어요?", "나: 공원에 갔어요.", "가: 공원에서 뭐 했어요?", "나: 산책했어요."],
+        "steps": [("어제 간 곳 묻기", "Ask where someone went", "어디에 갔어요?"), ("장소 말하기", "Say the place", "공원에 갔어요."), ("한 일 묻기", "Ask what someone did", "뭐 했어요?"), ("한 일 말하기", "Say what happened", "산책했어요.")],
+    },
+    10: {
+        "caption": ("함께 할 일을 제안하고 가는 목적을 말하는 대화예요.", "This dialogue proposes an activity and explains its purpose."),
+        "sequence": ("주말 약속 대화 순서", "Weekend plan dialogue sequence"),
+        "lines": ["가: 주말에 같이 영화관에 갈까요?", "나: 네, 좋아요. 왜 가요?", "가: 영화를 보러 가요.", "나: 좋아요. 토요일에 만나요."],
+        "steps": [("함께 가자고 제안하기", "Suggest going together", "같이 영화관에 갈까요?"), ("가는 이유 묻기", "Ask why", "왜 가요?"), ("가는 목적 말하기", "Say the purpose", "영화를 보러 가요."), ("약속 정하기", "Make the plan", "토요일에 만나요.")],
+    },
+}
+
+
+@st.fragment
+def render_later_unit_introduction(unit_number):
+    try:
+        render_later_unit_introduction_content(unit_number)
+    finally:
+        checkpoint_lesson_progress()
+
+
+def render_later_unit_introduction_content(unit_number):
+    content = LATER_UNIT_INTRODUCTIONS[unit_number]
+    selected_tab = st.session_state.get(f"_unit{unit_number}_lesson_tabs", "")
+    vocabulary_visible = (
+        selected_tab.startswith(("● 어휘와 표현", "● Vocabulary & Expressions"))
+        if selected_tab else not get_unit_completion_steps(unit_number)[0]
+    )
+    pending_tab = st.session_state.get("requested_lesson_tab")
+    if pending_tab and pending_tab[0] == unit_number:
+        vocabulary_visible = pending_tab[1] == 0
+    if st.session_state.get("force_unit_home_step") == unit_number:
+        vocabulary_visible = True
+    collapsed_key = f"unit{unit_number}_intro_collapsed"
+    st.session_state.setdefault(collapsed_key, not vocabulary_visible)
+    if vocabulary_visible:
+        st.session_state[collapsed_key] = False
+    current_round = st.session_state.get(f"unit{unit_number}_read_round", 0)
+    current_line = st.session_state.get(f"unit{unit_number}_read_line", 0)
+    sequence_step = min(int(st.session_state.get(f"unit{unit_number}_intro_sequence_step", 0)), 4)
+    if not vocabulary_visible:
+        with st.container(border=True):
+            summary, replay, close = st.columns([2.3, 1, .55], vertical_alignment="center")
+            with summary:
+                st.markdown(interface_text("**단원 도입 완료 ✓**", "**Unit introduction complete ✓")
+                            if current_round >= 3 and sequence_step >= 4 else interface_text("**단원 도입**", "**Unit introduction**"))
+                st.caption(" → ".join(interface_text(ko, en) for ko, en, _ in content["steps"]))
+            with replay:
+                lesson_button(interface_text("단원 도입 다시보기", "Review unit introduction"),
+                              key=f"unit{unit_number}_intro_expand", width="stretch",
+                              on_click=set_session_state_value, args=(collapsed_key, False))
+            with close:
+                if not st.session_state[collapsed_key]:
+                    lesson_button(interface_text("닫기", "Close"), key=f"unit{unit_number}_intro_close",
+                                  on_click=set_session_state_value, args=(collapsed_key, True))
+        st.space("medium")
+    if st.session_state[collapsed_key]:
+        return
+    render_learning_info(interface_text("단원 도입: 먼저 대화 모델을 3회 읽어 보세요.", "Unit introduction: First, read the model dialogue three times."), icon=":material/play_circle:")
+    st.markdown(interface_text("### 단원 도입 · 대화 모델 3회 읽기", "### Unit introduction · Read the model dialogue three times"))
+    st.caption(interface_text(*content["caption"]))
+    dialogue, sequence = st.columns(2)
+    lines = content["lines"]
+    with dialogue, st.container(border=True):
+        st.markdown(interface_text("**대화 모델 · 3회 반복 읽기**", "**Model dialogue · Read three times**"))
+        completed_reads = min(current_round, 3) * len(lines) + (current_line if current_round < 3 else 0)
+        total_reads = 3 * len(lines)
+        st.progress(completed_reads / total_reads, text=interface_text(f"읽기 진행 ({completed_reads}/{total_reads}문장)", f"Reading progress ({completed_reads}/{total_reads} lines)"))
+        for index, line in enumerate(lines):
+            done = current_round >= 3 or index < current_line
+            style = "done" if done else "active" if index == current_line else ""
+            marker = "✓" if done else "●" if index == current_line else "○"
+            st.markdown(f"<div class='reading-line {style}'><span class='reading-line-marker'>{marker}</span><span class='reading-line-text'>{html.escape(line)}</span></div>", unsafe_allow_html=True)
+        render_intro_reading_controls(unit_number, current_round, len(lines))
+    with sequence, st.container(border=True):
+        st.markdown(interface_text(f"**단원 도입 · {content['sequence'][0]}**", f"**Unit introduction · {content['sequence'][1]}**"))
+        st.caption(interface_text("대화를 3회 읽은 뒤 아래 카드를 순서대로 눌러 확인하세요.", "Read the dialogue three times, then select the cards in order."))
+        for index, (ko, en, example) in enumerate(content["steps"]):
+            if index < sequence_step:
+                with st.container(border=True):
+                    st.markdown(f"**✓ {index + 1}. {interface_text(ko, en)}** · {example}")
+            else:
+                lesson_button(interface_text(f"{index + 1}. {ko} 확인하기", f"{index + 1}. {en}"),
+                              key=f"unit{unit_number}_intro_sequence_{index}", width="stretch",
+                              disabled=current_round < 3 or index != sequence_step or not st.session_state.get(f"unit{unit_number}_intro_sequence_requested", False),
+                              on_click=set_session_state_value, args=(f"unit{unit_number}_intro_sequence_step", index + 1))
+        if sequence_step >= 4:
+            render_intro_sequence_success(unit_number)
+        reset_column, next_column = st.columns([1, 1.35])
+        with reset_column:
+            lesson_button(interface_text("순서 다시 보기", "Review the order again"),
+                          key=f"unit{unit_number}_intro_sequence_reset", width="stretch",
+                          on_click=set_session_state_value, args=(f"unit{unit_number}_intro_sequence_step", 0))
+        with next_column:
+            if lesson_button(interface_text("다음: 어휘와 표현 학습하기 →", "Next: Learn vocabulary and expressions →"),
+                             key=f"unit{unit_number}_intro_continue_vocabulary", type="primary", width="stretch", disabled=sequence_step < 4):
+                request_lesson_tab(unit_number, 0)
+                st.session_state["_intro_vocabulary_heading_unit"] = unit_number
+                st.rerun()
+    st.space("medium")
+
+
 def dashboard():
     weekdays = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
     today = datetime.now()
@@ -4225,6 +4455,21 @@ def render_unit_visual(unit_number, image_name, caption):
     st.caption(caption)
 
 
+def balanced_answer_options(options, answer, question_index):
+    """Vary the correct answer's position without changing answer values."""
+    choices = list(options)
+    if answer not in choices or len(choices) < 2:
+        return choices
+    distractors = choices.copy()
+    distractors.remove(answer)
+    if len(choices) == 2:
+        answer_position = question_index % 2
+    else:
+        answer_position = (0, 2, 1)[question_index % 3]
+    distractors.insert(answer_position, answer)
+    return distractors
+
+
 def render_choice_set(
     unit_number,
     stage,
@@ -4269,7 +4514,7 @@ def render_choice_set(
                 selections.append(
                     st.selectbox(
                         f"{index + 1}) {prompt}" if not dialogue_layout else interface_text(f"{index + 1}번 답 선택", f"Choose answer {index + 1}"),
-                        options,
+                        balanced_answer_options(options, answer, index),
                         index=None,
                         placeholder=interface_text("선택하세요", "Choose"),
                         key=f"unit{unit_number}_{stage}_choice_{index}{reset_suffix}",
@@ -4369,7 +4614,7 @@ def render_picture_word_cards(
                     )
                 choice = st.selectbox(
                     f"{index + 1}) {prompt}" if not dialogue_layout else interface_text(f"{index + 1}번 대화의 알맞은 답", f"Choose the answer for dialogue {index + 1}"),
-                    options,
+                    balanced_answer_options(options, answer, index),
                     index=None,
                     placeholder=interface_text("선택하세요", "Choose"),
                     key=choice_key,
@@ -5134,17 +5379,24 @@ def render_unit4_grammar1_intro():
         "친구를 만나다": "친구를 만나요",
         "일하다": "일해요",
     }
-    selected_action = st.selectbox(interface_text("오늘 할 일", "Activity to practice"), list(speaking_actions), key="unit4_grammar1_speaking_action")
-    render_learning_info(
-        ":orange[가: 오늘 무엇을 해요?]\n\n"
-        f":blue[나: {speaking_actions[selected_action]}.]",
-        icon=":material/record_voice_over:",
+    selected_action = st.selectbox(
+        interface_text("오늘 할 일", "Activity to practice"), list(speaking_actions),
+        index=None, placeholder=interface_text("선택하세요", "Choose"),
+        key="unit4_grammar1_speaking_action",
     )
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit4_grammar1_speaking_check", type="primary"):
+    if selected_action is not None:
+        render_learning_info(
+            ":orange[가: 오늘 무엇을 해요?]\n\n"
+            f":blue[나: {speaking_actions[selected_action]}.]",
+            icon=":material/record_voice_over:",
+        )
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit4_grammar1_speaking_check", type="primary", disabled=selected_action is None):
         st.session_state["unit4_grammar1_speaking_completed"] = True
         st.session_state["unit4_grammar1_checked_action"] = selected_action
+        queue_grammar1_final_scroll(4)
     speaking_done = (
-        st.session_state.get("unit4_grammar1_speaking_completed", False)
+        selected_action is not None
+        and st.session_state.get("unit4_grammar1_speaking_completed", False)
         and st.session_state.get("unit4_grammar1_checked_action") == selected_action
     )
     if speaking_done:
@@ -5235,20 +5487,22 @@ def render_unit3_activity1():
         {"이름": name, "물건": item, "위치": location, "누구": owner}
         for name, item, location, owner in dialogue_rows.values()
     ])
-    selected_row = st.selectbox(interface_text("연습할 대화", "Dialogue to practice"), list(dialogue_rows), key="unit3_activity1_dialogue_row")
-    name, item, location, owner = dialogue_rows[selected_row]
-    render_learning_info(
-        f":orange[가: 이 {item}이 {name} 씨 {item}이에요?]\n\n"
-        f":blue[나: 아니요. 제 {item}은 {location}에 있어요.]\n\n"
-        f":orange[가: 그럼 누구 {item}이에요?]\n\n"
-        f":blue[나: 그 {item}은 {owner} 씨 {item}이에요.]",
-        icon=":material/record_voice_over:",
-    )
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit3_activity1_dialogue_done", type="primary"):
+    selected_row = st.selectbox(interface_text("연습할 대화", "Dialogue to practice"), list(dialogue_rows), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit3_activity1_dialogue_row")
+    if selected_row is not None:
+        name, item, location, owner = dialogue_rows[selected_row]
+        render_learning_info(
+            f":orange[가: 이 {item}이 {name} 씨 {item}이에요?]\n\n"
+            f":blue[나: 아니요. 제 {item}은 {location}에 있어요.]\n\n"
+            f":orange[가: 그럼 누구 {item}이에요?]\n\n"
+            f":blue[나: 그 {item}은 {owner} 씨 {item}이에요.]",
+            icon=":material/record_voice_over:",
+        )
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit3_activity1_dialogue_done", type="primary", disabled=selected_row is None):
         st.session_state["unit3_activity1_dialogue_completed"] = True
         st.session_state["unit3_activity1_checked_row"] = selected_row
     dialogue_done = (
-        st.session_state.get("unit3_activity1_dialogue_completed", False)
+        selected_row is not None
+        and st.session_state.get("unit3_activity1_dialogue_completed", False)
         and st.session_state.get("unit3_activity1_checked_row") == selected_row
     )
     if dialogue_done:
@@ -5336,19 +5590,25 @@ def render_unit4_activity1():
         "유진 · 게임을 하다": ("유진", "게임을 해요"),
         "마리 · 일하다": ("마리", "일해요"),
     }
-    selected_row = st.selectbox(interface_text("연습할 사람과 할 일", "Person and activity to practice"), list(activity_rows), key="unit4_activity1_row")
-    person, action = activity_rows[selected_row]
-    render_learning_info(
-        f":orange[가: {person} 씨, 오늘 뭐 해요?]\n\n"
-        f":blue[나: 저는 {action}.]\n\n"
-        ":orange[가: 그래요? 저는 한국어를 공부해요.]",
-        icon=":material/record_voice_over:",
+    selected_row = st.selectbox(
+        interface_text("연습할 사람과 할 일", "Person and activity to practice"),
+        list(activity_rows), index=None,
+        placeholder=interface_text("선택하세요", "Choose"), key="unit4_activity1_row",
     )
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit4_activity1_speaking_done", type="primary"):
+    if selected_row is not None:
+        person, action = activity_rows[selected_row]
+        render_learning_info(
+            f":orange[가: {person} 씨, 오늘 뭐 해요?]\n\n"
+            f":blue[나: 저는 {action}.]\n\n"
+            ":orange[가: 그래요? 저는 한국어를 공부해요.]",
+            icon=":material/record_voice_over:",
+        )
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit4_activity1_speaking_done", type="primary", disabled=selected_row is None):
         st.session_state["unit4_activity1_speaking_completed"] = True
         st.session_state["unit4_activity1_checked_row"] = selected_row
     speaking_done = (
-        st.session_state.get("unit4_activity1_speaking_completed", False)
+        selected_row is not None
+        and st.session_state.get("unit4_activity1_speaking_completed", False)
         and st.session_state.get("unit4_activity1_checked_row") == selected_row
     )
     if speaking_done:
@@ -5575,27 +5835,32 @@ def render_unit4_activity2():
     message_done = render_choice_set(4, "activity2_message", message_questions, hide_reference_button=True)
 
     st.divider()
-    st.markdown(interface_text("### 2. 여러분은 오늘 무엇을 해요? 써 보세요.", "### 2. What are you doing today? Write three Korean sentences"))
+    st.markdown(interface_text("### 2. 여러분은 오늘 무엇을 해요? 골라서 문장을 완성해 보세요.", "### 2. What are you doing today? Choose words to complete three Korean sentences"))
     st.caption(interface_text("교재의 공책 활동처럼 장소 한 곳과 오늘 하는 일 두 가지를 골라 세 문장으로 완성하세요.", "Choose one location and two activities, then complete the three Korean sentences."))
     render_learning_info(
-        interface_text("**쓰기 순서**", "**Writing order**") + "\n\n"
-        "① 저는 지금 ___에 있어요.\n\n"
-        "② 오늘 ___을/를 해요.\n\n"
-        "③ 그리고 ___을/를 해요.",
+        interface_text("**선택 예문**", "**Example choices**") + "\n\n"
+        "① 저는 지금 **집**에 있어요.\n\n"
+        "② 오늘 **한국어를 공부해요**.\n\n"
+        "③ 그리고 **음악을 들어요**.",
         icon=":material/edit_note:",
     )
     writing_columns = st.columns(3)
     unit4_choose_label = interface_text("선택하세요", "Choose")
     with writing_columns[0]:
-        place = st.text_input(interface_text("① 지금 있는 곳", "① Current location (in Korean)"), placeholder=interface_text("예: 집", "Example: 집"), key="unit4_activity2_place")
+        place = st.selectbox(
+            interface_text("① 지금 있는 곳", "① Current location"),
+            ["집", "학교", "공원", "카페", "도서관", "회사", "식당", "교실"],
+            index=None, placeholder=unit4_choose_label,
+            key="unit4_activity2_place_choice",
+        )
     with writing_columns[1]:
         first_action = st.selectbox(interface_text("② 첫 번째 할 일", "② First activity"), [unit4_choose_label, "한국어를 공부해요", "책을 읽어요", "영화를 봐요", "친구를 만나요", "운동해요", "일해요"], key="unit4_activity2_first_action")
     with writing_columns[2]:
         second_action = st.selectbox(interface_text("③ 두 번째 할 일", "③ Second activity"), [unit4_choose_label, "밥을 먹어요", "음악을 들어요", "요리해요", "게임을 해요", "자요"], key="unit4_activity2_second_action")
-    writing_ready = bool(place.strip()) and first_action != unit4_choose_label and second_action != unit4_choose_label
+    writing_ready = place is not None and first_action != unit4_choose_label and second_action != unit4_choose_label
     response = ""
     if writing_ready:
-        response = f"저는 지금 {place.strip()}에 있어요. 오늘 {first_action.rstrip('.')}. 그리고 {second_action.rstrip('.')}."
+        response = f"저는 지금 {place}에 있어요. 오늘 {first_action.rstrip('.')}. 그리고 {second_action.rstrip('.')}."
         render_learning_success(response, icon=":material/edit_note:")
     return response if message_done and writing_ready else ""
 
@@ -5830,13 +6095,20 @@ def render_unit5_grammar1_intro():
     )
     st.divider()
     st.markdown(interface_text("### 2. 어디에 가요? 무엇을 해요?", "### 2. Where are you going? What are you doing?"))
-    destination = st.selectbox(interface_text("가는 장소", "Destination"), ["세종학당", "공원", "식당", "카페", "마트"], key="unit5_g1_destination")
-    action = {"세종학당":"한국어를 공부해요", "공원":"운동해요", "식당":"밥을 먹어요", "카페":"커피를 마셔요", "마트":"장을 봐요"}[destination]
-    render_learning_info(f":orange[가: 어디에 가요?]\n\n:blue[나: {destination}에 가요.]\n\n:orange[가: 뭐 해요?]\n\n:blue[나: {action}.]", icon=":material/forum:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit5_g1_speaking_done", type="primary"):
+    destination = st.selectbox(
+        interface_text("가는 장소", "Destination"),
+        ["세종학당", "공원", "식당", "카페", "마트"],
+        index=None, placeholder=interface_text("선택하세요", "Choose"),
+        key="unit5_g1_destination",
+    )
+    if destination is not None:
+        action = {"세종학당":"한국어를 공부해요", "공원":"운동해요", "식당":"밥을 먹어요", "카페":"커피를 마셔요", "마트":"장을 봐요"}[destination]
+        render_learning_info(f":orange[가: 어디에 가요?]\n\n:blue[나: {destination}에 가요.]\n\n:orange[가: 뭐 해요?]\n\n:blue[나: {action}.]", icon=":material/forum:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit5_g1_speaking_done", type="primary", disabled=destination is None):
         st.session_state["unit5_grammar1_speaking_completed"] = True
         st.session_state["unit5_g1_checked_destination"] = destination
-    speaking_done = st.session_state.get("unit5_grammar1_speaking_completed", False) and st.session_state.get("unit5_g1_checked_destination") == destination
+        queue_grammar1_final_scroll(5)
+    speaking_done = destination is not None and st.session_state.get("unit5_grammar1_speaking_completed", False) and st.session_state.get("unit5_g1_checked_destination") == destination
     if speaking_done:
         render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
     else:
@@ -5879,18 +6151,16 @@ def render_unit5_grammar2():
     )
     st.divider()
     st.markdown(interface_text("### 2. 우리 교실에 무엇이 있어요? 누가 있어요?", "### 2. What and who are in our classroom?"))
-    item1 = st.selectbox(interface_text("첫 번째 물건", "First object"), ["시계", "칠판", "책상", "컴퓨터"], index=None, placeholder=interface_text("선택하세요", "Choose"), key="unit5_g2_item1_choice")
-    item2 = st.selectbox(interface_text("두 번째 물건", "Second object"), ["칠판", "의자", "책", "가방"], index=None, placeholder=interface_text("선택하세요", "Choose"), key="unit5_g2_item2_choice")
-    sentence_ready = bool(item1 and item2 and item1 != item2)
+    item1 = st.selectbox(interface_text("교실에 있는 물건", "Object in the classroom"), ["시계", "칠판", "책상", "컴퓨터"], index=None, placeholder=interface_text("선택하세요", "Choose"), key="unit5_g2_item1_choice")
+    person = st.selectbox(interface_text("교실에 있는 사람", "Person in the classroom"), ["안나 씨", "주노 씨", "마리 씨", "재민 씨", "유진 씨", "수지 씨"], index=None, placeholder=interface_text("선택하세요", "Choose"), key="unit5_g2_person_choice")
+    sentence_ready = bool(item1 and person)
     if sentence_ready:
-        item2_particle = subject_particle(item2)
-        render_learning_info(f"교실에 {item1}하고 {item2}{item2_particle} 있어요.", icon=":material/forum:")
-    elif item1 and item2:
-        st.caption(interface_text("서로 다른 물건 두 개를 선택해 주세요.", "Choose two different objects."))
+        person_particle = subject_particle(person)
+        render_learning_info(f"교실에 {item1}하고 {person}{person_particle} 있어요.", icon=":material/forum:")
     if lesson_button(interface_text("2번 문장을 소리 내어 읽었어요", "I read the Activity 2 sentence aloud"), key="unit5_g2_speaking_done", type="primary", disabled=not sentence_ready):
         st.session_state["unit5_grammar2_speaking_completed"] = True
-        st.session_state["unit5_g2_checked_items"] = (item1, item2)
-    speaking_done = sentence_ready and st.session_state.get("unit5_grammar2_speaking_completed", False) and st.session_state.get("unit5_g2_checked_items") == (item1, item2)
+        st.session_state["unit5_g2_checked_items"] = (item1, person)
+    speaking_done = sentence_ready and st.session_state.get("unit5_grammar2_speaking_completed", False) and st.session_state.get("unit5_g2_checked_items") == (item1, person)
     if speaking_done:
         render_learning_success(interface_text("2번 문장 읽기를 완료했어요.", "You completed the Activity 2 sentence reading."), icon=":material/check_circle:")
     else:
@@ -5916,13 +6186,18 @@ def render_unit5_activity1():
     ]
     reading_done = render_choice_set(5, "activity1_reading", questions, hide_reference_button=True)
     st.markdown(interface_text("### 2. 어디에 가요? 무엇을 사요?", "### 2. Where are you going? What are you buying?"))
-    place = st.selectbox(interface_text("장소", "Place"), ["식당", "백화점", "학교", "마트"], key="unit5_a1_place")
-    items = {"식당":"라면하고 김밥을 먹어요", "백화점":"옷하고 신발을 사요", "학교":"한국어하고 영어를 공부해요", "마트":"빵하고 우유를 사요"}[place]
-    render_learning_info(f"가: 어디에 가요?\n\n나: {place}에 가요.\n\n가: 뭘 해요?\n\n나: {items}.", icon=":material/record_voice_over:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit5_a1_speaking_done", type="primary"):
+    place = st.selectbox(
+        interface_text("장소", "Place"), ["식당", "백화점", "학교", "마트"],
+        index=None, placeholder=interface_text("선택하세요", "Choose"),
+        key="unit5_a1_place",
+    )
+    if place is not None:
+        items = {"식당":"라면하고 김밥을 먹어요", "백화점":"옷하고 신발을 사요", "학교":"한국어하고 영어를 공부해요", "마트":"빵하고 우유를 사요"}[place]
+        render_learning_info(f"가: 어디에 가요?\n\n나: {place}에 가요.\n\n가: 뭘 해요?\n\n나: {items}.", icon=":material/record_voice_over:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit5_a1_speaking_done", type="primary", disabled=place is None):
         st.session_state["unit5_activity1_speaking_completed"] = True
         st.session_state["unit5_a1_checked_place"] = place
-    speaking_done = st.session_state.get("unit5_activity1_speaking_completed", False) and st.session_state.get("unit5_a1_checked_place") == place
+    speaking_done = place is not None and st.session_state.get("unit5_activity1_speaking_completed", False) and st.session_state.get("unit5_a1_checked_place") == place
     if speaking_done:
         render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
     else:
@@ -5951,18 +6226,26 @@ def render_unit5_activity2():
     first = st.selectbox(interface_text("첫 번째 물건", "First item"), ["옷", "신발", "가방", "화장품", "모자"], index=None, placeholder=interface_text("선택하세요", "Choose"), key="unit5_a2_first")
     second = st.selectbox(interface_text("두 번째 물건", "Second item"), ["신발", "옷", "가방", "화장품", "모자"], index=None, placeholder=interface_text("선택하세요", "Choose"), key="unit5_a2_second")
     response = ""
-    if first and second and first != second:
+    sentence_ready = bool(first and second and first != second)
+    if sentence_ready:
         second_object_particle = "을" if subject_particle(second) == "이" else "를"
         response = f"저는 백화점에 가요. {first}하고 {second}{second_object_particle} 사요."
         render_learning_success(response, icon=":material/edit_note:")
-        st.caption(interface_text("문장을 소리 내어 읽어 보세요. 다른 물건을 골라 여러 번 연습할 수 있어요.", "Read the sentence aloud. Choose other items to practice again."))
-        lesson_button(interface_text("다른 물건으로 다시 연습하기", "Practice with other items"),
-                      key="unit5_a2_retry_items", on_click=reset_unit5_activity2_items)
+        st.caption(interface_text("완성한 문장을 소리 내어 두 번 읽어 보세요.", "Read the completed sentence aloud twice."))
+    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read the Activity 2 sentence twice"),
+                     key="unit5_a2_read_aloud", type="primary", disabled=not sentence_ready):
+        st.session_state["unit5_a2_read_completed"] = True
+        st.session_state["unit5_a2_checked_items"] = (first, second)
+    speaking_done = sentence_ready and st.session_state.get("unit5_a2_read_completed", False) and st.session_state.get("unit5_a2_checked_items") == (first, second)
+    if speaking_done:
+        render_learning_success(interface_text("2번 문장 읽기를 완료했어요.", "You completed reading the Activity 2 sentence."), icon=":material/check_circle:")
+    else:
+        st.session_state.pop("unit5_a2_read_completed", None)
     if not reading_done:
         st.caption(interface_text("먼저 1번의 두 문제를 모두 맞혀 주세요.", "First, answer both questions in Activity 1 correctly."))
     elif first and second and first == second:
         st.caption(interface_text("서로 다른 물건 두 개를 선택해 주세요.", "Choose two different items."))
-    return response if reading_done else ""
+    return response if reading_done and speaking_done else ""
 
 
 def render_unit6_reference(image_name, box_class, box_html, guide_width=500, crop_box=None):
@@ -6136,14 +6419,28 @@ def render_unit6_grammar1_intro():
     )
     st.divider()
     st.markdown(interface_text("### 2. 교실 물건과 수량을 선택해 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Choose a classroom object and quantity, then read the Korean dialogue aloud"))
-    item = st.selectbox(interface_text("교실 물건", "Classroom object"), ["책상", "의자", "컴퓨터", "시계"], key="unit6_g1_item")
-    count = st.selectbox(interface_text("수량", "Quantity"), ["한 개", "두 개", "세 개", "네 개", "다섯 개"], key="unit6_g1_count")
-    item_particle = subject_particle(item)
-    render_learning_info(f"가: 교실에 {item}{item_particle} 몇 개 있어요?\n\n나: {item}{item_particle} {count} 있어요.", icon=":material/forum:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit6_g1_speaking_done", type="primary"):
+    item = st.selectbox(
+        interface_text("교실 물건", "Classroom object"),
+        ["책상", "의자", "컴퓨터", "시계"],
+        index=None,
+        placeholder=interface_text("선택하세요", "Select one"),
+        key="unit6_g1_item",
+    )
+    count = st.selectbox(
+        interface_text("수량", "Quantity"),
+        ["한 개", "두 개", "세 개", "네 개", "다섯 개"],
+        index=None,
+        placeholder=interface_text("선택하세요", "Select one"),
+        key="unit6_g1_count",
+    )
+    if item is not None and count is not None:
+        item_particle = subject_particle(item)
+        render_learning_info(f"가: 교실에 {item}{item_particle} 몇 개 있어요?\n\n나: {item}{item_particle} {count} 있어요.", icon=":material/forum:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit6_g1_speaking_done", type="primary", disabled=item is None or count is None):
         st.session_state["unit6_grammar1_speaking_completed"] = True
         st.session_state["unit6_g1_checked_choice"] = (item, count)
-    speaking_done = st.session_state.get("unit6_grammar1_speaking_completed", False) and st.session_state.get("unit6_g1_checked_choice") == (item, count)
+        queue_grammar1_final_scroll(6)
+    speaking_done = item is not None and count is not None and st.session_state.get("unit6_grammar1_speaking_completed", False) and st.session_state.get("unit6_g1_checked_choice") == (item, count)
     if not speaking_done:
         st.session_state.pop("unit6_grammar1_speaking_completed", None)
     done = picture_done and speaking_done
@@ -6192,7 +6489,6 @@ def render_unit6_grammar2():
     )
     if first_done and second_done:
         st.session_state["grammar2_done_6"] = True
-        render_learning_success(interface_text("문법 2의 1번과 2번을 모두 완료했어요.", "You completed both Grammar 2 activities."), icon=":material/check_circle:")
     else:
         st.session_state.pop("grammar2_done_6", None)
 
@@ -6212,14 +6508,23 @@ def render_unit6_activity1():
         ("모두 얼마예요?", ["10,000원", "2,000원", "5,000원"], "10,000원", "2,000원짜리 사과 다섯 개는 10,000원이에요."),
     ], hide_reference_button=True)
     st.markdown(interface_text("### 2. 무엇을 사요? 과일과 수량을 정하고 대화해 보세요.", "### 2. Choose a fruit and quantity, then practice the Korean dialogue"))
-    fruit = st.selectbox(interface_text("과일", "Fruit"), ["사과", "배", "귤", "복숭아"], key="unit6_a1_fruit")
-    quantity = st.selectbox(interface_text("수량", "Quantity"), ["한 개", "두 개", "세 개", "네 개", "다섯 개"], key="unit6_a1_quantity")
-    render_learning_info(f"주인: 무엇을 드릴까요?\n\n나: {fruit} {quantity} 주세요.", icon=":material/record_voice_over:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit6_a1_speaking_done", type="primary"):
+    fruit = st.selectbox(
+        interface_text("과일", "Fruit"), ["사과", "배", "귤", "복숭아"],
+        index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit6_a1_fruit",
+    )
+    quantity = st.selectbox(
+        interface_text("수량", "Quantity"), ["한 개", "두 개", "세 개", "네 개", "다섯 개"],
+        index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit6_a1_quantity",
+    )
+    if fruit is not None and quantity is not None:
+        render_learning_info(f"주인: 무엇을 드릴까요?\n\n나: {fruit} {quantity} 주세요.", icon=":material/record_voice_over:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit6_a1_speaking_done", type="primary", disabled=fruit is None or quantity is None):
         st.session_state["unit6_activity1_speaking_completed"] = True
         st.session_state["unit6_a1_checked_choice"] = (fruit, quantity)
-    speaking_done = st.session_state.get("unit6_activity1_speaking_completed", False) and st.session_state.get("unit6_a1_checked_choice") == (fruit, quantity)
-    if not speaking_done:
+    speaking_done = fruit is not None and quantity is not None and st.session_state.get("unit6_activity1_speaking_completed", False) and st.session_state.get("unit6_a1_checked_choice") == (fruit, quantity)
+    if speaking_done:
+        render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
+    else:
         st.session_state.pop("unit6_activity1_speaking_completed", None)
     if reading_done and speaking_done:
         st.session_state["activity1_completed_6"] = True
@@ -6249,24 +6554,47 @@ def render_unit6_activity2():
     for index, column in enumerate(cols):
         with column:
             item = st.selectbox(interface_text(f"{index + 1}번째 물건", f"Item {index + 1}"), options, key=f"unit6_a2_item_{index}")
-            count = st.selectbox(interface_text(f"{index + 1}번째 수량", f"Quantity {index + 1}"), ["한 개", "두 개", "세 개", "네 개", "다섯 개"], key=f"unit6_a2_count_{index}")
+            count = st.selectbox(
+                interface_text(f"{index + 1}번째 수량", f"Quantity {index + 1}"),
+                ["한 개", "두 개", "세 개", "네 개", "다섯 개"],
+                index=None, placeholder=unit6_choose_label, key=f"unit6_a2_count_{index}",
+            )
             selected.append((item, count))
-    ready = all(item != unit6_choose_label for item, _ in selected) and len({item for item, _ in selected}) == 3
+    ready = all(item != unit6_choose_label and count is not None for item, count in selected) and len({item for item, _ in selected}) == 3
     response = ""
     if ready:
         response = f"저는 편의점에서 {selected[0][0]} {selected[0][1]}하고 {selected[1][0]} {selected[1][1]}, {selected[2][0]} {selected[2][1]}를 사요."
         render_learning_success(response, icon=":material/edit_note:")
+        st.caption(interface_text("완성한 문장을 소리 내어 두 번 읽어 보세요.", "Read the completed sentence aloud twice."))
     else:
         st.caption(interface_text("서로 다른 물건 세 가지와 수량을 모두 선택해 주세요.", "Choose three different objects and a quantity for each."))
-    response_read_aloud = st.checkbox(
-        interface_text("완성한 수량 문장을 소리 내어 읽었어요", "I read my completed Korean quantity sentence aloud"),
-        key="unit6_a2_response_read_aloud",
-        disabled=not (reading_done and ready),
-        on_change=set_session_state_value,
-        args=("unit6_a2_checked_response", response),
-    )
-    response_read_aloud_current = response_read_aloud and st.session_state.get("unit6_a2_checked_response") == response
-    return response if reading_done and ready and response_read_aloud_current else ""
+    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read the Activity 2 sentence twice"),
+                     key="unit6_a2_read_aloud", type="primary", disabled=not ready):
+        st.session_state["unit6_a2_read_completed"] = True
+        st.session_state["unit6_a2_checked_response"] = response
+    speaking_done = ready and st.session_state.get("unit6_a2_read_completed", False) and st.session_state.get("unit6_a2_checked_response") == response
+    if speaking_done:
+        render_learning_success(interface_text("2번 문장 읽기를 완료했어요.", "You completed reading the Activity 2 sentence."), icon=":material/check_circle:")
+    else:
+        st.session_state.pop("unit6_a2_read_completed", None)
+    if not reading_done:
+        st.caption(interface_text("먼저 1번의 두 문제를 모두 맞혀 주세요.", "First, answer both questions in Activity 1 correctly."))
+    return response if reading_done and speaking_done else ""
+
+
+def render_activity2_read_completion(unit_number, response, ready):
+    """Use the same read-twice confirmation for later-unit Activity 2 sentences."""
+    st.caption(interface_text("완성한 문장을 소리 내어 두 번 읽어 보세요.", "Read the completed sentence aloud twice."))
+    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read the Activity 2 sentence twice"),
+                     key=f"unit{unit_number}_a2_read_aloud", type="primary", disabled=not ready):
+        st.session_state[f"unit{unit_number}_a2_read_completed"] = True
+        st.session_state[f"unit{unit_number}_a2_checked_response"] = response
+    speaking_done = ready and st.session_state.get(f"unit{unit_number}_a2_read_completed", False) and st.session_state.get(f"unit{unit_number}_a2_checked_response") == response
+    if speaking_done:
+        render_learning_success(interface_text("2번 문장 읽기를 완료했어요.", "You completed reading the Activity 2 sentence."), icon=":material/check_circle:")
+    else:
+        st.session_state.pop(f"unit{unit_number}_a2_read_completed", None)
+    return speaking_done
 
 
 def render_unit8_grammar1():
@@ -6291,20 +6619,25 @@ def render_unit8_grammar1():
     action = st.selectbox(
         interface_text("활동을 선택하세요.", "Activity to practice"),
         ["운동해요", "영화를 봐요", "쇼핑해요", "요리해요"],
+        index=None, placeholder=interface_text("선택하세요", "Select one"),
         key="unit8_g1_action",
     )
-    negative_action = {
-        "운동해요": "운동 :orange[**안**] 해요",
-        "영화를 봐요": "영화를 :orange[**안**] 봐요",
-        "쇼핑해요": "쇼핑 :orange[**안**] 해요",
-        "요리해요": "요리 :orange[**안**] 해요",
-    }[action]
-    render_learning_info(
-        f"가: 오늘 {action}?\n\n나: 아니요. 오늘 {negative_action}.",
-        icon=":material/forum:",
-    )
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit8_g1_speaking",type="primary"): st.session_state["unit8_g1_speaking_done"]=True; st.session_state["unit8_g1_checked_action"]=action
-    speaking_done=st.session_state.get("unit8_g1_speaking_done",False) and st.session_state.get("unit8_g1_checked_action")==action
+    if action is not None:
+        negative_action = {
+            "운동해요": "운동 :orange[**안**] 해요",
+            "영화를 봐요": "영화를 :orange[**안**] 봐요",
+            "쇼핑해요": "쇼핑 :orange[**안**] 해요",
+            "요리해요": "요리 :orange[**안**] 해요",
+        }[action]
+        render_learning_info(
+            f"가: 오늘 {action}?\n\n나: 아니요. 오늘 {negative_action}.",
+            icon=":material/forum:",
+        )
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit8_g1_speaking",type="primary",disabled=action is None):
+        st.session_state["unit8_g1_speaking_done"] = True
+        st.session_state["unit8_g1_checked_action"] = action
+        queue_grammar1_final_scroll(8)
+    speaking_done=action is not None and st.session_state.get("unit8_g1_speaking_done",False) and st.session_state.get("unit8_g1_checked_action")==action
     if not speaking_done: st.session_state.pop("unit8_g1_speaking_done",None)
     if first and speaking_done: st.session_state["unit8_grammar1_activities_completed"]=True
     else: st.session_state.pop("unit8_grammar1_activities_completed",None)
@@ -6341,6 +6674,7 @@ def render_unit8_grammar2():
     subject = st.selectbox(
         interface_text("무엇의 상태를 말할까요?", "What condition will you describe?"),
         ["날씨", "가방"],
+        index=None, placeholder=interface_text("선택하세요", "Select one"),
         key="unit8_g2_subject",
     )
     state_options = {
@@ -6349,17 +6683,19 @@ def render_unit8_grammar2():
     }
     state = st.selectbox(
         interface_text("알맞은 상태를 선택하세요.", "Choose the condition"),
-        state_options[subject],
-        key="unit8_g2_state",
+        state_options[subject] if subject else [],
+        index=None, placeholder=interface_text("선택하세요", "Select one"),
+        key="unit8_g2_state", disabled=subject is None,
     )
-    question = "지금 날씨가 어때요?" if subject == "날씨" else "이 가방이 어때요?"
-    degree = "좀" if subject == "날씨" else "아주"
-    render_learning_info(
-        f"가: {question}\n\n나: {degree} :orange[**{state}**].",
-        icon=":material/forum:",
-    )
-    if lesson_button(interface_text("2번 대화를 소리 내어 읽었어요", "I read the Activity 2 dialogue aloud"),key="unit8_g2_speaking",type="primary"): st.session_state["unit8_g2_speaking_done"]=True; st.session_state["unit8_g2_checked_choice"]=(subject,state)
-    speaking_done=st.session_state.get("unit8_g2_speaking_done",False) and st.session_state.get("unit8_g2_checked_choice")== (subject,state)
+    if subject is not None and state is not None:
+        question = "지금 날씨가 어때요?" if subject == "날씨" else "이 가방이 어때요?"
+        degree = "좀" if subject == "날씨" else "아주"
+        render_learning_info(
+            f"가: {question}\n\n나: {degree} :orange[**{state}**].",
+            icon=":material/forum:",
+        )
+    if lesson_button(interface_text("2번 대화를 소리 내어 읽었어요", "I read the Activity 2 dialogue aloud"),key="unit8_g2_speaking",type="primary",disabled=subject is None or state is None): st.session_state["unit8_g2_speaking_done"]=True; st.session_state["unit8_g2_checked_choice"]=(subject,state)
+    speaking_done=subject is not None and state is not None and st.session_state.get("unit8_g2_speaking_done",False) and st.session_state.get("unit8_g2_checked_choice")== (subject,state)
     if not speaking_done: st.session_state.pop("unit8_g2_speaking_done",None)
     if first and speaking_done: st.session_state["grammar2_done_8"]=True
     else: st.session_state.pop("grammar2_done_8",None)
@@ -6377,16 +6713,20 @@ def render_unit8_activity1():
         "**예**\n\n가: 서울은 날씨가 어때요?\n\n나: 서울은 :orange[**비가 자주 와요**].",
         icon=":material/lightbulb:",
     )
-    region = st.selectbox(interface_text("지역", "Region"),["서울","부산","하와이","시드니"],key="unit8_a1_city")
-    weather = st.selectbox(interface_text("날씨", "Weather"),["비가 자주 와요","더워요","안 추워요","쌀쌀해요","추워요"],key="unit8_a1_weather")
-    region_topic = "은" if subject_particle(region) == "이" else "는"
-    render_learning_info(
-        f"가: {region}{region_topic} 날씨가 어때요?\n\n나: {region}{region_topic} :orange[**{weather}**].",
-        icon=":material/forum:",
-    )
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit8_a1_speaking",type="primary"): st.session_state["unit8_a1_speaking_done"]=True; st.session_state["unit8_a1_checked_choice"]=(region,weather)
-    speaking_done=st.session_state.get("unit8_a1_speaking_done",False) and st.session_state.get("unit8_a1_checked_choice")== (region,weather)
-    if not speaking_done: st.session_state.pop("unit8_a1_speaking_done",None)
+    region = st.selectbox(interface_text("지역", "Region"),["서울","부산","하와이","시드니"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit8_a1_city")
+    weather = st.selectbox(interface_text("날씨", "Weather"),["비가 자주 와요","더워요","안 추워요","쌀쌀해요","추워요"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit8_a1_weather")
+    if region is not None and weather is not None:
+        region_topic = "은" if subject_particle(region) == "이" else "는"
+        render_learning_info(
+            f"가: {region}{region_topic} 날씨가 어때요?\n\n나: {region}{region_topic} :orange[**{weather}**].",
+            icon=":material/forum:",
+        )
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit8_a1_speaking",type="primary",disabled=region is None or weather is None): st.session_state["unit8_a1_speaking_done"]=True; st.session_state["unit8_a1_checked_choice"]=(region,weather)
+    speaking_done=region is not None and weather is not None and st.session_state.get("unit8_a1_speaking_done",False) and st.session_state.get("unit8_a1_checked_choice")== (region,weather)
+    if speaking_done:
+        render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
+    else:
+        st.session_state.pop("unit8_a1_speaking_done", None)
     if first and speaking_done: st.session_state["activity1_completed_8"]=True
     else: st.session_state.pop("activity1_completed_8",None)
 
@@ -6415,19 +6755,19 @@ def render_unit8_activity2():
     with place_column:
         place = st.text_input(interface_text("고향", "Hometown (in Korean)"),placeholder=interface_text("예: 부산", "Example: 부산"),key="unit8_a2_place")
     with season_column:
-        season = st.selectbox(interface_text("계절", "Season"),["봄","여름","가을","겨울"],key="unit8_a2_season")
+        season = st.selectbox(interface_text("계절", "Season"),["봄","여름","가을","겨울"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit8_a2_season")
     with weather_column:
-        weather = st.selectbox(interface_text("날씨", "Weather"),["따뜻해요","더워요","시원해요","추워요"],key="unit8_a2_weather")
+        weather = st.selectbox(interface_text("날씨", "Weather"),["따뜻해요","더워요","시원해요","추워요"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit8_a2_weather")
     place_name = place.strip()
     place_ending = "이에요" if place_name and subject_particle(place_name) == "이" else "예요"
-    response=f"제 고향은 {place_name}{place_ending}. {season}은 {weather}." if place_name else ""
+    response=f"제 고향은 {place_name}{place_ending}. {season}은 {weather}." if place_name and season is not None and weather is not None else ""
     if response:
         render_learning_success(
             f"제 고향은 {place_name}{place_ending}. {season}은 :orange[**{weather}**].",
             icon=":material/edit_note:",
         )
-    response_read_aloud=st.checkbox(interface_text("완성한 고향·계절 문장을 소리 내어 읽었어요", "I read my completed Korean hometown-and-season sentence aloud"), key="unit8_a2_response_read_aloud", disabled=not (first and response), on_change=set_session_state_value, args=("unit8_a2_checked_response", response))
-    return response if first and response and response_read_aloud and st.session_state.get("unit8_a2_checked_response")==response else ""
+    speaking_done = render_activity2_read_completion(8, response, bool(response))
+    return response if first and speaking_done else ""
 
 
 def render_unit8_vocabulary_panel(vocabulary_words, active_index, example_sentence):
@@ -6451,7 +6791,7 @@ def render_unit8_vocabulary_panel(vocabulary_words, active_index, example_senten
     ]
     second=render_picture_word_cards(8, "vocab_season", seasons, season_images, single_image_width=180)
     st.divider(); st.markdown(interface_text("### 3. 대화를 읽고 빈칸에 알맞은 날씨 표현을 선택해 보세요.", "### 3. Read the Korean dialogue and choose the correct weather expression"))
-    third=render_choice_set(8,"vocab_weather_dialogue",[("가: 이번 주말에 날씨가 어때요?\n나: 날씨가 ___, 따뜻해요.",["맑아요","추워요","눈이 와요"],"맑아요","날씨와 상태를 함께 말해요."),("가: 겨울 날씨가 어때요?\n나: 아주 ___.",["추워요","더워요","시원해요"],"추워요","겨울은 추워요."),("가: 비가 와요?\n나: 아니요. 날씨가 ___.",["맑아요","비가 와요","눈이 와요"],"맑아요","비가 오지 않고 맑은 날씨예요.")],dialogue_layout=True, hide_reference_button=True)
+    third=render_choice_set(8,"vocab_weather_dialogue",[("가: 일기예보에 이번 주말은 해가 나고 구름이 없대요. 날씨가 어때요?\n나: 날씨가 ___. 따뜻해요.",["맑아요","추워요","눈이 와요"],"맑아요","해가 나고 구름이 없으므로 맑아요."),("가: 겨울 날씨가 어때요?\n나: 아주 ___.",["추워요","더워요","시원해요"],"추워요","겨울은 추워요."),("가: 비가 와요?\n나: 아니요. 날씨가 ___.",["맑아요","비가 와요","눈이 와요"],"맑아요","비가 오지 않고 맑은 날씨예요.")],dialogue_layout=True, hide_reference_button=True)
     return second and third
 
 
@@ -6567,26 +6907,28 @@ def render_unit9_grammar1():
     action_symbols = {"산책했어요": "🚶", "운동했어요": "🏃", "공부했어요": "✏️", "책을 읽었어요": "📖", "밥을 먹었어요": "🥄", "영화를 봤어요": "🎬", "쉬었어요": "☕", "쇼핑했어요": "🛒"}
     choice_column, preview_column = st.columns([1, 1.45], gap="medium", vertical_alignment="center")
     with choice_column:
-        place = st.selectbox("① 장소를 선택하세요", list(UNIT9_PLACE_ACTIONS), key="unit9_g1_place")
-        action = st.selectbox("② 활동을 선택하세요", UNIT9_PLACE_ACTIONS[place], key="unit9_g1_action")
-    with preview_column:
-        with st.container(border=True, height=184):
-            st.markdown("<div style='text-align:center;color:#aebbd0;font-size:.86rem;font-weight:750'>나의 장면</div>", unsafe_allow_html=True)
-            st.markdown(
-                f"<div style='display:flex;align-items:center;justify-content:center;gap:22px;margin-top:12px'>"
-                f"<div style='text-align:center'><div style='font-size:2.6rem'>{place_symbols[place]}</div><b>{place}</b></div>"
-                "<div style='font-size:1.7rem;color:#78aef8'>→</div>"
-                f"<div style='text-align:center'><div style='font-size:2.6rem'>{action_symbols[action]}</div><b>{action}</b></div>"
-                "</div>"
-                f"<div style='text-align:center;margin-top:14px;font-size:1.05rem;font-weight:850'>{place}<span style='color:#78aef8'>에서</span> {action}</div>",
-                unsafe_allow_html=True,
-            )
-    render_learning_info(f"가: 어제 어디에서 무엇을 했어요?\n\n나: {place}:orange[**에서**] {action}", icon=":material/record_voice_over:")
+        place = st.selectbox("① 장소를 선택하세요", list(UNIT9_PLACE_ACTIONS), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_g1_place")
+        action = st.selectbox("② 활동을 선택하세요", UNIT9_PLACE_ACTIONS[place] if place else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_g1_action", disabled=place is None)
+    if place is not None and action is not None:
+        with preview_column:
+            with st.container(border=True, height=184):
+                st.markdown("<div style='text-align:center;color:#aebbd0;font-size:.86rem;font-weight:750'>나의 장면</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div style='display:flex;align-items:center;justify-content:center;gap:22px;margin-top:12px'>"
+                    f"<div style='text-align:center'><div style='font-size:2.6rem'>{place_symbols[place]}</div><b>{place}</b></div>"
+                    "<div style='font-size:1.7rem;color:#78aef8'>→</div>"
+                    f"<div style='text-align:center'><div style='font-size:2.6rem'>{action_symbols[action]}</div><b>{action}</b></div>"
+                    "</div>"
+                    f"<div style='text-align:center;margin-top:14px;font-size:1.05rem;font-weight:850'>{place}<span style='color:#78aef8'>에서</span> {action}</div>",
+                    unsafe_allow_html=True,
+                )
+        render_learning_info(f"가: 어제 어디에서 무엇을 했어요?\n\n나: {place}:orange[**에서**] {action}", icon=":material/record_voice_over:")
     st.caption(interface_text("① 질문을 읽어요.  ② ‘장소 + 에서’를 말해요.  ③ 선택한 활동으로 대답을 마쳐요.", "1. Read the question. 2. Say 장소 + 에서. 3. Finish the answer with the selected activity."))
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit9_g1_speaking", type="primary"):
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit9_g1_speaking", type="primary", disabled=place is None or action is None):
         st.session_state["unit9_g1_speaking_done"] = True
         st.session_state["unit9_g1_checked_choice"] = (place, action)
-    speaking_done = st.session_state.get("unit9_g1_speaking_done", False) and st.session_state.get("unit9_g1_checked_choice") == (place, action)
+        queue_grammar1_final_scroll(9)
+    speaking_done = place is not None and action is not None and st.session_state.get("unit9_g1_speaking_done", False) and st.session_state.get("unit9_g1_checked_choice") == (place, action)
     if not speaking_done:
         st.session_state.pop("unit9_g1_speaking_done", None)
     if speaking_done:
@@ -6646,9 +6988,10 @@ def render_unit9_grammar2():
     activity_symbols = {"산책해요": "🚶", "공부해요": "✏️", "밥을 먹어요": "🥄", "영화를 봐요": "🎬", "운동해요": "🏃", "쇼핑해요": "🛒"}
     selector_column, timeline_column = st.columns([1, 1.6], gap="medium", vertical_alignment="center")
     with selector_column:
-        present = st.selectbox(interface_text("바꿀 현재 표현", "Present expression"), list(past_forms), key="unit9_g2_present")
+        present = st.selectbox(interface_text("바꿀 현재 표현", "Present expression"), list(past_forms), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_g2_present")
         st.caption(interface_text("표현을 바꾸어 보며 현재형과 과거형을 비교하세요.", "Compare the present and past forms as you change the expression."))
-    with timeline_column:
+    if present is not None:
+      with timeline_column:
         with st.container(border=True, height=168):
             st.markdown(
                 f"<div style='display:flex;align-items:center;justify-content:center;gap:18px;margin-top:10px'>"
@@ -6661,12 +7004,12 @@ def render_unit9_grammar2():
                 "</div>",
                 unsafe_allow_html=True,
             )
-    render_learning_info(f"어제 :orange[**{past_forms[present]}**]", icon=":material/history:")
+      render_learning_info(f"어제 :orange[**{past_forms[present]}**]", icon=":material/history:")
     st.caption(interface_text("‘오늘’ 문장과 ‘어제’ 문장을 번갈아 읽으며 달라진 부분을 확인하세요.", "Read the 오늘 and 어제 sentences in turn and notice what changes."))
-    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read the Activity 2 sentences aloud twice"), key="unit9_g2_speaking", type="primary"):
+    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read the Activity 2 sentences aloud twice"), key="unit9_g2_speaking", type="primary", disabled=present is None):
         st.session_state["unit9_g2_speaking_done"] = True
         st.session_state["unit9_g2_checked_present"] = present
-    speaking_done = st.session_state.get("unit9_g2_speaking_done", False) and st.session_state.get("unit9_g2_checked_present") == present
+    speaking_done = present is not None and st.session_state.get("unit9_g2_speaking_done", False) and st.session_state.get("unit9_g2_checked_present") == present
     if not speaking_done:
         st.session_state.pop("unit9_g2_speaking_done", None)
     if first and speaking_done:
@@ -6714,9 +7057,10 @@ def render_unit9_activity1():
     action_symbols = {"산책했어요": "🚶", "운동했어요": "🏃", "공부했어요": "✏️", "책을 읽었어요": "📖", "밥을 먹었어요": "🥄", "영화를 봤어요": "🎬", "쉬었어요": "☕", "쇼핑했어요": "🛒"}
     choice_column, memory_column = st.columns([1, 1.45], gap="medium", vertical_alignment="center")
     with choice_column:
-        place = st.selectbox("① 내가 간 장소", list(UNIT9_PLACE_ACTIONS), key="unit9_a1_place")
-        action = st.selectbox("② 내가 한 활동", UNIT9_PLACE_ACTIONS[place], key="unit9_a1_action")
-    with memory_column:
+        place = st.selectbox("① 내가 간 장소", list(UNIT9_PLACE_ACTIONS), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a1_place")
+        action = st.selectbox("② 내가 한 활동", UNIT9_PLACE_ACTIONS[place] if place else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a1_action", disabled=place is None)
+    if place is not None and action is not None:
+      with memory_column:
         with st.container(border=True, height=184):
             st.markdown("<div style='text-align:center;color:#aebbd0;font-size:.85rem;font-weight:750'>나의 어제 카드</div>", unsafe_allow_html=True)
             st.markdown(
@@ -6727,20 +7071,22 @@ def render_unit9_activity1():
                 f"<div style='text-align:center;margin-top:14px;font-weight:850'>어제 {place}<span style='color:#78aef8'>에서</span> {action}</div>",
                 unsafe_allow_html=True,
             )
-    render_learning_info(
-        f"가: 어제 어디:orange[**에**] 갔어요?\n\n"
-        f"나: {place}:orange[**에**] 갔어요.\n\n"
-        f"가: {place}:orange[**에서**] 뭐 했어요?\n\n"
-        f"나: {action}",
-        icon=":material/forum:",
-    )
+      render_learning_info(
+          f"가: 어제 어디:orange[**에**] 갔어요?\n\n"
+          f"나: {place}:orange[**에**] 갔어요.\n\n"
+          f"가: {place}:orange[**에서**] 뭐 했어요?\n\n"
+          f"나: {action}",
+          icon=":material/forum:",
+      )
     st.caption(interface_text("‘에’는 간 장소, ‘에서’는 활동한 장소 뒤에 붙어요.", "Use 에 for the destination and 에서 for the place where the activity happened."))
     st.caption(interface_text("카드를 보지 않고 한 번, 카드를 보며 한 번 대답해 보세요.", "Answer once without the card, then once while looking at it."))
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit9_a1_speaking", type="primary"):
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"), key="unit9_a1_speaking", type="primary", disabled=place is None or action is None):
         st.session_state["unit9_a1_speaking_done"] = True
         st.session_state["unit9_a1_checked_choice"] = (place, action)
-    speaking_done = st.session_state.get("unit9_a1_speaking_done", False) and st.session_state.get("unit9_a1_checked_choice") == (place, action)
-    if not speaking_done:
+    speaking_done = place is not None and action is not None and st.session_state.get("unit9_a1_speaking_done", False) and st.session_state.get("unit9_a1_checked_choice") == (place, action)
+    if speaking_done:
+        render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
+    else:
         st.session_state.pop("unit9_a1_speaking_done", None)
     if first and speaking_done:
         st.session_state["activity1_completed_9"] = True
@@ -6774,25 +7120,26 @@ def render_unit9_activity2():
         ("마지막 문장에는 무엇을 써요?", ["나의 느낌", "전화번호", "오늘 날짜"], "나의 느낌", "마지막에는 주말이 어땠는지 느낌을 써요."),
     ], hide_reference_button=True)
     st.markdown(interface_text("### 2. 요일·시간·활동·느낌을 선택해 주말 기록을 완성해 보세요.", "### 2. Choose a weekday, times, activities, and feeling to complete your Korean weekend record"))
-    day = st.selectbox(interface_text("요일", "Weekday"), ["토요일", "일요일"], key="unit9_a2_day")
+    day = st.selectbox(interface_text("요일", "Weekday"), ["토요일", "일요일"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_day")
     row1, row2 = st.columns(2, gap="medium")
     with row1:
-        time1 = st.selectbox(interface_text("첫 번째 시간", "First time"), ["오전", "오후", "저녁"], key="unit9_a2_time1")
-        place1 = st.selectbox(interface_text("첫 번째 장소", "First place"), list(UNIT9_PLACE_ACTIONS), key="unit9_a2_place1")
-        action1 = st.selectbox(interface_text("첫 번째 활동", "First activity"), UNIT9_PLACE_ACTIONS[place1], key="unit9_a2_action1")
+        time1 = st.selectbox(interface_text("첫 번째 시간", "First time"), ["오전", "오후", "저녁"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_time1")
+        place1 = st.selectbox(interface_text("첫 번째 장소", "First place"), list(UNIT9_PLACE_ACTIONS), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_place1")
+        action1 = st.selectbox(interface_text("첫 번째 활동", "First activity"), UNIT9_PLACE_ACTIONS[place1] if place1 else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_action1", disabled=place1 is None)
     with row2:
-        time2 = st.selectbox(interface_text("두 번째 시간", "Second time"), ["오후", "저녁", "오전"], key="unit9_a2_time2")
-        place2 = st.selectbox(interface_text("두 번째 장소", "Second place"), list(UNIT9_PLACE_ACTIONS), index=3, key="unit9_a2_place2")
-        action2 = st.selectbox(interface_text("두 번째 활동", "Second activity"), UNIT9_PLACE_ACTIONS[place2], key="unit9_a2_action2")
-    feeling = st.selectbox(interface_text("마지막 느낌", "Final feeling"), ["정말 즐거웠어요", "아주 재미있었어요", "조금 피곤했어요", "기분이 좋았어요"], key="unit9_a2_feeling")
+        time2 = st.selectbox(interface_text("두 번째 시간", "Second time"), ["오후", "저녁", "오전"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_time2")
+        place2 = st.selectbox(interface_text("두 번째 장소", "Second place"), list(UNIT9_PLACE_ACTIONS), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_place2")
+        action2 = st.selectbox(interface_text("두 번째 활동", "Second activity"), UNIT9_PLACE_ACTIONS[place2] if place2 else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_action2", disabled=place2 is None)
+    feeling = st.selectbox(interface_text("마지막 느낌", "Final feeling"), ["정말 즐거웠어요", "아주 재미있었어요", "조금 피곤했어요", "기분이 좋았어요"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit9_a2_feeling")
+    details_ready = all(value is not None for value in (day, time1, place1, action1, time2, place2, action2, feeling))
     place_symbols = {"공원": "🌳", "도서관": "📚", "식당": "🍚", "집": "🏠", "헬스장": "🏋️", "백화점": "🛍️"}
     action_symbols = {"산책했어요": "🚶", "운동했어요": "🏃", "공부했어요": "✏️", "책을 읽었어요": "📖", "밥을 먹었어요": "🥄", "영화를 봤어요": "🎬", "쉬었어요": "☕", "쇼핑했어요": "🛒"}
     st.markdown("#### 나의 주말 타임라인")
     timeline_columns = st.columns([1, 0.18, 1, 0.18, 1], gap="small", vertical_alignment="center")
     timeline_items = [
-        (timeline_columns[0], "📅", day, "어제"),
-        (timeline_columns[2], place_symbols[place1], f"{time1} · {place1}", action_symbols[action1] + " " + action1),
-        (timeline_columns[4], place_symbols[place2], f"{time2} · {place2}", action_symbols[action2] + " " + action2),
+        (timeline_columns[0], "📅", day or interface_text("선택하세요", "Select one"), "어제"),
+        (timeline_columns[2], place_symbols.get(place1, "📍"), f"{time1 or '…'} · {place1 or '…'}", action_symbols.get(action1, "") + " " + (action1 or "")),
+        (timeline_columns[4], place_symbols.get(place2, "📍"), f"{time2 or '…'} · {place2 or '…'}", action_symbols.get(action2, "") + " " + (action2 or "")),
     ]
     for column, symbol, title, detail in timeline_items:
         with column:
@@ -6809,23 +7156,18 @@ def render_unit9_activity2():
     st.markdown(
         f"<div style='display:flex;align-items:center;justify-content:center;gap:12px;padding:12px 16px;border:1px solid #31445f;border-radius:12px;margin-top:10px'>"
         f"<span style='font-size:1.8rem'>💭</span><span style='color:#aebbd0'>주말의 느낌:</span>"
-        f"<b style='color:#f2a65a'>{feeling}</b></div>",
+        f"<b style='color:#f2a65a'>{feeling or interface_text('선택하세요', 'Select one')}</b></div>",
         unsafe_allow_html=True,
     )
-    response = f"어제는 {day}이었어요.\n{time1}에는 {place1}에서 {action1}.\n{time2}에는 {place2}에서 {action2}.\n{feeling}."
-    render_learning_success(response, icon=":material/edit_note:")
-    if place1 == place2 or time1 == time2:
+    response = f"어제는 {day}이었어요.\n{time1}에는 {place1}에서 {action1}.\n{time2}에는 {place2}에서 {action2}.\n{feeling}." if details_ready else ""
+    if response:
+        render_learning_success(response, icon=":material/edit_note:")
+    if details_ready and (place1 == place2 or time1 == time2):
         render_learning_warning(interface_text("서로 다른 시간과 장소를 선택하면 시간의 흐름이 잘 보이는 기록을 완성할 수 있어요.", "Choose different times and places so the sequence is clear."), icon=":material/lightbulb:")
         return ""
     st.caption(interface_text("타임라인을 왼쪽에서 오른쪽으로 보고, 마지막 느낌까지 네 문장을 이어서 읽어 보세요.", "Read the four Korean sentences from left to right, including the final feeling."))
-    response_read_aloud = st.checkbox(
-        interface_text("완성한 주말 기록을 소리 내어 읽었어요", "I read my completed Korean weekend record aloud"),
-        key="unit9_a2_response_read_aloud",
-        disabled=not first,
-        on_change=set_session_state_value,
-        args=("unit9_a2_checked_response", response),
-    )
-    return response if first and response_read_aloud and st.session_state.get("unit9_a2_checked_response") == response else ""
+    speaking_done = render_activity2_read_completion(9, response, details_ready)
+    return response if first and speaking_done else ""
 
 
 UNIT10_DESTINATION_PURPOSES = {
@@ -6911,17 +7253,19 @@ def render_unit10_grammar1():
     suggestion_forms = {"놀이공원에 가다": "놀이공원에 갈까요?", "영화를 보다": "영화를 볼까요?", "점심을 먹다": "점심을 먹을까요?", "공원에서 산책하다": "공원에서 산책할까요?"}
     left, right = st.columns([1, 1.45], gap="medium", vertical_alignment="center")
     with left:
-        day = st.selectbox("① 약속 요일", ["토요일", "일요일"], key="unit10_g1_day")
-        base = st.selectbox("② 함께할 일", list(suggestion_forms), key="unit10_g1_base")
-    with right:
-        with st.container(border=True, height=174):
-            st.markdown("<div style='text-align:center;font-size:2.4rem'>💌</div><div style='text-align:center;color:#aebbd0;margin-top:5px'>나의 주말 제안</div>", unsafe_allow_html=True)
-            st.markdown(f"<div style='text-align:center;font-size:1.12rem;font-weight:850;margin-top:14px'>{day}에 같이 <span style='color:#f2a65a'>{suggestion_forms[base]}</span></div>", unsafe_allow_html=True)
-    render_learning_info(f"가: {day}에 같이 :orange[**{suggestion_forms[base]}**]\n\n나: 네, 좋아요!", icon=":material/forum:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read dialogue 2 aloud twice"), key="unit10_g1_speaking", type="primary"):
+        day = st.selectbox("① 약속 요일", ["토요일", "일요일"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_g1_day")
+        base = st.selectbox("② 함께할 일", list(suggestion_forms), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_g1_base")
+    if day is not None and base is not None:
+        with right:
+            with st.container(border=True, height=174):
+                st.markdown("<div style='text-align:center;font-size:2.4rem'>💌</div><div style='text-align:center;color:#aebbd0;margin-top:5px'>나의 주말 제안</div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='text-align:center;font-size:1.12rem;font-weight:850;margin-top:14px'>{day}에 같이 <span style='color:#f2a65a'>{suggestion_forms[base]}</span></div>", unsafe_allow_html=True)
+        render_learning_info(f"가: {day}에 같이 :orange[**{suggestion_forms[base]}**]\n\n나: 네, 좋아요!", icon=":material/forum:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read dialogue 2 aloud twice"), key="unit10_g1_speaking", type="primary", disabled=day is None or base is None):
         st.session_state["unit10_g1_speaking_done"] = True
         st.session_state["unit10_g1_checked_choice"] = (day, base)
-    speaking_done = st.session_state.get("unit10_g1_speaking_done", False) and st.session_state.get("unit10_g1_checked_choice") == (day, base)
+        queue_grammar1_final_scroll(10)
+    speaking_done = day is not None and base is not None and st.session_state.get("unit10_g1_speaking_done", False) and st.session_state.get("unit10_g1_checked_choice") == (day, base)
     if not speaking_done:
         st.session_state.pop("unit10_g1_speaking_done", None)
     if first and speaking_done:
@@ -6971,16 +7315,17 @@ def render_unit10_grammar2():
     symbols = {"놀이공원": "🎡", "영화관": "🎬", "식당": "🍚", "공원": "🌳", "카페": "☕", "도서관": "📚"}
     left, right = st.columns([1, 1.5], gap="medium", vertical_alignment="center")
     with left:
-        destination = st.selectbox("① 목적지", list(UNIT10_DESTINATION_PURPOSES), key="unit10_g2_destination")
-        purpose = st.selectbox("② 목적", UNIT10_DESTINATION_PURPOSES[destination], key="unit10_g2_purpose")
-    with right:
-        with st.container(border=True, height=174):
-            st.markdown(f"<div style='display:flex;align-items:center;justify-content:center;gap:20px;margin-top:15px'><div style='text-align:center'><div style='font-size:2.6rem'>🚶</div><b>출발</b></div><div style='color:#78aef8;font-size:1.8rem'>→</div><div style='text-align:center'><div style='font-size:2.6rem'>{symbols[destination]}</div><b>{destination}</b></div></div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:14px'>{purpose}</div>", unsafe_allow_html=True)
-    render_learning_info(f"저는 {destination}:orange[**에**] {purpose[:-2]} :orange[**가요.**]", icon=":material/directions_walk:")
-    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read sentence 2 aloud twice"), key="unit10_g2_speaking", type="primary"):
+        destination = st.selectbox("① 목적지", list(UNIT10_DESTINATION_PURPOSES), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_g2_destination")
+        purpose = st.selectbox("② 목적", UNIT10_DESTINATION_PURPOSES[destination] if destination else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_g2_purpose", disabled=destination is None)
+    if destination is not None and purpose is not None:
+        with right:
+            with st.container(border=True, height=174):
+                st.markdown(f"<div style='display:flex;align-items:center;justify-content:center;gap:20px;margin-top:15px'><div style='text-align:center'><div style='font-size:2.6rem'>🚶</div><b>출발</b></div><div style='color:#78aef8;font-size:1.8rem'>→</div><div style='text-align:center'><div style='font-size:2.6rem'>{symbols[destination]}</div><b>{destination}</b></div></div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:14px'>{purpose}</div>", unsafe_allow_html=True)
+        render_learning_info(f"저는 {destination}:orange[**에**] {purpose[:-2]} :orange[**가요.**]", icon=":material/directions_walk:")
+    if lesson_button(interface_text("2번 문장을 두 번 읽었어요", "I read sentence 2 aloud twice"), key="unit10_g2_speaking", type="primary", disabled=destination is None or purpose is None):
         st.session_state["unit10_g2_speaking_done"] = True
         st.session_state["unit10_g2_checked_choice"] = (destination, purpose)
-    speaking_done = st.session_state.get("unit10_g2_speaking_done", False) and st.session_state.get("unit10_g2_checked_choice") == (destination, purpose)
+    speaking_done = destination is not None and purpose is not None and st.session_state.get("unit10_g2_speaking_done", False) and st.session_state.get("unit10_g2_checked_choice") == (destination, purpose)
     if not speaking_done:
         st.session_state.pop("unit10_g2_speaking_done", None)
     if first and speaking_done:
@@ -7014,22 +7359,25 @@ def render_unit10_activity1():
     ], hide_reference_button=True)
     st.markdown(interface_text("### 2. 약속 정보를 선택해 나의 제안 대화를 만들어 보세요.", "### 2. Choose the details to create your own suggestion dialogue."))
     c1, c2, c3 = st.columns(3, gap="medium")
-    with c1: day = st.selectbox("요일", ["토요일", "일요일"], key="unit10_a1_day")
-    with c2: time = st.selectbox("시간", ["한 시", "두 시", "세 시", "네 시"], key="unit10_a1_time")
-    with c3: plan = st.selectbox("함께할 일", ["영화를 볼까요?", "점심을 먹을까요?", "공원에서 산책할까요?", "놀이공원에 갈까요?"], key="unit10_a1_plan")
+    with c1: day = st.selectbox("요일", ["토요일", "일요일"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a1_day")
+    with c2: time = st.selectbox("시간", ["한 시", "두 시", "세 시", "네 시"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a1_time")
+    with c3: plan = st.selectbox("함께할 일", ["영화를 볼까요?", "점심을 먹을까요?", "공원에서 산책할까요?", "놀이공원에 갈까요?"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a1_plan")
     reaction = st.radio("제안에 어떻게 대답할까요?", ["네, 좋아요!", "미안해요. 그날은 바빠요."], key="unit10_a1_reaction", horizontal=True)
     with st.container(border=True):
         reaction_symbol = "😊" if reaction == "네, 좋아요!" else "🙏"
         st.markdown(f"<div style='text-align:center;font-size:2.3rem'>{reaction_symbol}</div><div style='text-align:center;color:#aebbd0'>나의 대답</div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:8px'>{reaction}</div>", unsafe_allow_html=True)
-    if reaction == "네, 좋아요!":
-        render_learning_info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction} 몇 시에 만날까요?\n\n가: {time}에 만나요.", icon=":material/event_available:")
-    else:
-        render_learning_info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction}\n\n가: 네, 다음에 같이 가요.", icon=":material/event_busy:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read dialogue 2 aloud twice"), key="unit10_a1_speaking", type="primary"):
+    if day is not None and time is not None and plan is not None:
+        if reaction == "네, 좋아요!":
+            render_learning_info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction} 몇 시에 만날까요?\n\n가: {time}에 만나요.", icon=":material/event_available:")
+        else:
+            render_learning_info(f"가: {day}에 같이 :orange[**{plan}**]\n\n나: {reaction}\n\n가: 네, 다음에 같이 가요.", icon=":material/event_busy:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read dialogue 2 aloud twice"), key="unit10_a1_speaking", type="primary", disabled=day is None or time is None or plan is None):
         st.session_state["unit10_a1_speaking_done"] = True
         st.session_state["unit10_a1_checked_choice"] = (day, time, plan, reaction)
-    speaking_done = st.session_state.get("unit10_a1_speaking_done", False) and st.session_state.get("unit10_a1_checked_choice") == (day, time, plan, reaction)
-    if not speaking_done:
+    speaking_done = day is not None and time is not None and plan is not None and st.session_state.get("unit10_a1_speaking_done", False) and st.session_state.get("unit10_a1_checked_choice") == (day, time, plan, reaction)
+    if speaking_done:
+        render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
+    else:
         st.session_state.pop("unit10_a1_speaking_done", None)
     if first and speaking_done:
         st.session_state["activity1_completed_10"] = True
@@ -7060,26 +7408,23 @@ def render_unit10_activity2():
     st.markdown(interface_text("### 2. 정보를 선택해 나의 약속 카드를 완성해 보세요.", "### 2. Choose the details to complete your weekend-plan card."))
     left, right = st.columns(2, gap="medium")
     with left:
-        day = st.selectbox("요일", ["토요일", "일요일"], key="unit10_a2_day")
-        time = st.selectbox("시간", ["한 시", "두 시", "세 시", "네 시", "다섯 시"], key="unit10_a2_time")
+        day = st.selectbox("요일", ["토요일", "일요일"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a2_day")
+        time = st.selectbox("시간", ["한 시", "두 시", "세 시", "네 시", "다섯 시"], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a2_time")
     with right:
-        place = st.selectbox("장소", list(UNIT10_DESTINATION_PURPOSES), key="unit10_a2_place")
-        purpose = st.selectbox("목적", UNIT10_DESTINATION_PURPOSES[place], key="unit10_a2_purpose")
-    meeting_point = st.selectbox("만나는 위치", [f"{place} 앞", f"{place} 입구"], key="unit10_a2_meeting_point")
+        place = st.selectbox("장소", list(UNIT10_DESTINATION_PURPOSES), index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a2_place")
+        purpose = st.selectbox("목적", UNIT10_DESTINATION_PURPOSES[place] if place else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a2_purpose", disabled=place is None)
+    meeting_point = st.selectbox("만나는 위치", [f"{place} 앞", f"{place} 입구"] if place else [], index=None, placeholder=interface_text("선택하세요", "Select one"), key="unit10_a2_meeting_point", disabled=place is None)
     symbols = {"놀이공원": "🎡", "영화관": "🎬", "식당": "🍚", "공원": "🌳", "카페": "☕", "도서관": "📚"}
-    with st.container(border=True):
-        st.markdown(f"<div style='text-align:center;font-size:2.7rem'>{symbols[place]}</div><div style='text-align:center;color:#78aef8;font-weight:850'>MY WEEKEND PLAN</div><div style='display:flex;justify-content:center;gap:28px;margin-top:12px'><b>📅 {day}</b><b>🕒 {time}</b><b>📍 {meeting_point}</b></div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:14px'>🎯 {purpose}</div>", unsafe_allow_html=True)
-    response = f"{day}에 같이 {place}에 갈까요?\n좋아요. {place}에 {purpose}\n{time}에 {meeting_point}에서 만나요."
-    render_learning_success(response, icon=":material/calendar_month:")
+    details_ready = all(value is not None for value in (day, time, place, purpose, meeting_point))
+    response = ""
+    if details_ready:
+        with st.container(border=True):
+            st.markdown(f"<div style='text-align:center;font-size:2.7rem'>{symbols[place]}</div><div style='text-align:center;color:#78aef8;font-weight:850'>MY WEEKEND PLAN</div><div style='display:flex;justify-content:center;gap:28px;margin-top:12px'><b>📅 {day}</b><b>🕒 {time}</b><b>📍 {meeting_point}</b></div><div style='text-align:center;color:#f2a65a;font-weight:850;margin-top:14px'>🎯 {purpose}</div>", unsafe_allow_html=True)
+        response = f"{day}에 같이 {place}에 갈까요?\n좋아요. {place}에 {purpose}\n{time}에 {meeting_point}에서 만나요."
+        render_learning_success(response, icon=":material/calendar_month:")
     st.caption(interface_text("약속 카드를 보고 세 문장을 자연스럽게 이어서 읽어 보세요.", "Read the three Korean sentences on your weekend-plan card aloud."))
-    response_read_aloud = st.checkbox(
-        interface_text("완성한 주말 약속을 소리 내어 읽었어요", "I read my completed Korean weekend plan aloud"),
-        key="unit10_a2_response_read_aloud",
-        disabled=not first,
-        on_change=set_session_state_value,
-        args=("unit10_a2_checked_response", response),
-    )
-    return response if first and response_read_aloud and st.session_state.get("unit10_a2_checked_response") == response else ""
+    speaking_done = render_activity2_read_completion(10, response, details_ready)
+    return response if first and speaking_done else ""
 
 
 def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_sentence):
@@ -7122,7 +7467,7 @@ def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_senten
         ("가: 수지 씨, 생일이 언제예요?\n나: ___이에요.", ["10월 5일", "1월 16일", "6월 22일"], "10월 5일", "표에서 수지의 생일을 찾아요."),
         ("가: 안나 씨, 생일이 언제예요?\n나: ___이에요.", ["10월 5일", "1월 16일", "6월 22일"], "1월 16일", "표에서 안나의 생일을 찾아요."),
         ("가: 재민 씨, 생일이 언제예요?\n나: ___이에요.", ["10월 5일", "1월 16일", "6월 22일"], "6월 22일", "표에서 재민의 생일을 찾아요."),
-        ("가: 생일이 언제예요?\n나: ___이에요.", ["10월 5일이에요.", "일곱 시예요.", "수요일이에요."], "10월 5일이에요.", "생일은 월과 일을 함께 말해요."),
+        ("가: 민호 씨, 생일이 언제예요?\n나: ___이에요.", ["8월 12일", "1월 16일", "6월 22일"], "8월 12일", "표에서 민호의 생일을 찾아요."),
     ]
     birthday_picture, birthday_question = st.columns([0.8, 1.2], gap="small", vertical_alignment="top")
     with birthday_picture:
@@ -7131,6 +7476,7 @@ def render_unit7_vocabulary_panel(vocabulary_words, active_index, example_senten
             {"이름": "수지", "생일": "10월 5일"},
             {"이름": "안나", "생일": "1월 16일"},
             {"이름": "재민", "생일": "6월 22일"},
+            {"이름": "민호", "생일": "8월 12일"},
         ])
     with birthday_question:
         dialogue_done = render_choice_set(
@@ -7159,10 +7505,14 @@ def render_unit7_grammar1():
     qs=[("수업은 일곱 시__ 시작해요.",["에","에서","을"],"에","구체적인 시각 뒤에는 ‘에’를 사용해요."),("수요일__ 친구를 만나요.",["에","에서","를"],"에","요일 뒤에도 ‘에’를 사용해요."),("3월 5일__ 생일 파티를 해요.",["에","은","을"],"에","날짜 뒤에는 ‘에’를 사용해요."),("내일__ 영화를 봐요.",["(없음)","에","에서"],"(없음)","‘오늘·내일·어제’ 뒤에는 보통 ‘에’를 붙이지 않아요.")]
     first=render_choice_set(7,"grammar1_time",qs, hide_reference_button=True)
     st.markdown(interface_text("### 2. 요일과 시간을 선택해 대화를 완성하고 소리 내어 읽어 보세요.", "### 2. Choose a weekday and time, then read the Korean dialogue aloud"))
-    day=st.selectbox(interface_text("요일", "Weekday"),["월요일","화요일","수요일","목요일","금요일"],key="unit7_g1_day"); hour=st.selectbox(interface_text("시간", "Time"),["오전 아홉 시","오전 열 시","오후 세 시","저녁 일곱 시"],key="unit7_g1_hour")
-    render_learning_info(f"가: 언제 만나요?\n\n나: {day} {hour}에 만나요.\n\n가: 좋아요. 그때 만나요!",icon=":material/forum:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit7_g1_speaking",type="primary"): st.session_state["unit7_g1_speaking_done"]=True; st.session_state["unit7_g1_checked_choice"]=(day,hour)
-    speaking_done = st.session_state.get("unit7_g1_speaking_done",False) and st.session_state.get("unit7_g1_checked_choice")== (day,hour)
+    day=st.selectbox(interface_text("요일", "Weekday"),["월요일","화요일","수요일","목요일","금요일"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit7_g1_day"); hour=st.selectbox(interface_text("시간", "Time"),["오전 아홉 시","오전 열 시","오후 세 시","저녁 일곱 시"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit7_g1_hour")
+    if day is not None and hour is not None:
+        render_learning_info(f"가: 언제 만나요?\n\n나: {day} {hour}에 만나요.\n\n가: 좋아요. 그때 만나요!",icon=":material/forum:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit7_g1_speaking",type="primary",disabled=day is None or hour is None):
+        st.session_state["unit7_g1_speaking_done"] = True
+        st.session_state["unit7_g1_checked_choice"] = (day, hour)
+        queue_grammar1_final_scroll(7)
+    speaking_done = day is not None and hour is not None and st.session_state.get("unit7_g1_speaking_done",False) and st.session_state.get("unit7_g1_checked_choice")== (day,hour)
     if not speaking_done: st.session_state.pop("unit7_g1_speaking_done",None)
     if first and speaking_done: st.session_state["unit7_grammar1_activities_completed"]=True
     else: st.session_state.pop("unit7_grammar1_activities_completed",None)
@@ -7177,10 +7527,11 @@ def render_unit7_grammar2():
     st.markdown(interface_text("### 2. 오늘의 일정을 말해 보세요.", "### 2. Say today’s schedule in Korean"))
     event_sentences={"한국어 수업":"한국어 수업이 있어요.","친구 만나기":"친구를 만나요.","점심 먹기":"점심을 먹어요.","운동하기":"운동해요."}
     event_questions={"한국어 수업":"한국어 수업이 있어요","친구 만나기":"친구를 만나요","점심 먹기":"점심을 먹어요","운동하기":"운동해요"}
-    event=st.selectbox(interface_text("활동", "Activity"),list(event_sentences),key="unit7_g2_event"); t=st.selectbox(interface_text("시간", "Time"),["오전 아홉 시","오후 열두 시 반","오후 세 시","저녁 일곱 시 십 분"],key="unit7_g2_time")
-    render_learning_info(f"가: 몇 시에 {event_questions[event]}?\n\n나: {t}에 {event_sentences[event]}",icon=":material/forum:")
-    if lesson_button(interface_text("2번 문장을 소리 내어 읽었어요", "I read the Activity 2 sentence aloud"),key="unit7_g2_speaking",type="primary"): st.session_state["unit7_g2_speaking_done"]=True; st.session_state["unit7_g2_checked_choice"]=(event,t)
-    speaking_done = st.session_state.get("unit7_g2_speaking_done",False) and st.session_state.get("unit7_g2_checked_choice")== (event,t)
+    event=st.selectbox(interface_text("활동", "Activity"),list(event_sentences),index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit7_g2_event"); t=st.selectbox(interface_text("시간", "Time"),["오전 아홉 시","오후 열두 시 반","오후 세 시","저녁 일곱 시 십 분"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit7_g2_time")
+    if event is not None and t is not None:
+        render_learning_info(f"가: 몇 시에 {event_questions[event]}?\n\n나: {t}에 {event_sentences[event]}",icon=":material/forum:")
+    if lesson_button(interface_text("2번 문장을 소리 내어 읽었어요", "I read the Activity 2 sentence aloud"),key="unit7_g2_speaking",type="primary",disabled=event is None or t is None): st.session_state["unit7_g2_speaking_done"]=True; st.session_state["unit7_g2_checked_choice"]=(event,t)
+    speaking_done = event is not None and t is not None and st.session_state.get("unit7_g2_speaking_done",False) and st.session_state.get("unit7_g2_checked_choice")== (event,t)
     if not speaking_done: st.session_state.pop("unit7_g2_speaking_done",None)
     if a and speaking_done: st.session_state["grammar2_done_7"]=True
     else: st.session_state.pop("grammar2_done_7",None)
@@ -7257,10 +7608,17 @@ def render_unit7_activity1():
             )
             st.space("small")
             done=render_choice_set(7,"activity1_schedule",[("안나 씨는 언제 세종학당에 가요?",["목요일","금요일","일요일"],"목요일","일정 카드에서 요일을 확인해요."),("수업은 몇 시에 시작해요?",["저녁 일곱 시","아침 아홉 시","열두 시"],"저녁 일곱 시","일정 카드와 대화에서 시간을 확인해요."),("맞는 문장을 고르세요.",["목요일 저녁 일곱 시에 수업이 있어요.","목요일에 일곱 분 수업이 있어요.","오늘에 수업이 있어요."],"목요일 저녁 일곱 시에 수업이 있어요.","요일과 시각 뒤에 ‘에’를 붙여 일정을 말해요.")], hide_reference_button=True)
-    st.markdown(interface_text("### 2. 나의 수업 약속을 만들어 말해 보세요.", "### 2. Make and say your own class appointment")); day=st.selectbox(interface_text("요일", "Weekday"),["월요일","수요일","목요일","금요일"],key="unit7_a1_day"); tm=st.selectbox(interface_text("시간", "Time"),["오전 아홉 시","오후 세 시","저녁 일곱 시"],key="unit7_a1_time"); render_learning_info(f"가: 한국어 수업은 언제 해요?\n\n나: {day} {tm}에 해요.\n\n가: 좋아요. 수업에서 만나요!",icon=":material/record_voice_over:")
-    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit7_a1_speaking",type="primary"): st.session_state["unit7_a1_speaking_done"]=True; st.session_state["unit7_a1_checked_choice"]=(day,tm)
-    speaking_done=st.session_state.get("unit7_a1_speaking_done",False) and st.session_state.get("unit7_a1_checked_choice")== (day,tm)
-    if not speaking_done: st.session_state.pop("unit7_a1_speaking_done",None)
+    st.markdown(interface_text("### 2. 나의 수업 약속을 만들어 말해 보세요.", "### 2. Make and say your own class appointment"))
+    day=st.selectbox(interface_text("요일", "Weekday"),["월요일","수요일","목요일","금요일"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit7_a1_day")
+    tm=st.selectbox(interface_text("시간", "Time"),["오전 아홉 시","오후 세 시","저녁 일곱 시"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit7_a1_time")
+    if day is not None and tm is not None:
+        render_learning_info(f"가: 한국어 수업은 언제 해요?\n\n나: {day} {tm}에 해요.\n\n가: 좋아요. 수업에서 만나요!",icon=":material/record_voice_over:")
+    if lesson_button(interface_text("2번 대화를 두 번 읽었어요", "I read the Activity 2 dialogue aloud twice"),key="unit7_a1_speaking",type="primary",disabled=day is None or tm is None): st.session_state["unit7_a1_speaking_done"]=True; st.session_state["unit7_a1_checked_choice"]=(day,tm)
+    speaking_done=day is not None and tm is not None and st.session_state.get("unit7_a1_speaking_done",False) and st.session_state.get("unit7_a1_checked_choice")== (day,tm)
+    if speaking_done:
+        render_learning_success(interface_text("2번 대화 읽기를 완료했어요.", "You completed the Activity 2 dialogue reading."), icon=":material/check_circle:")
+    else:
+        st.session_state.pop("unit7_a1_speaking_done", None)
     if done and speaking_done: st.session_state["activity1_completed_7"]=True
     else: st.session_state.pop("activity1_completed_7",None)
 
@@ -7304,8 +7662,8 @@ def render_unit7_activity2():
         with st.container(border=True):
             st.markdown(interface_text("#### 🗓️ 나의 하루 시간표", "#### 🗓️ My Daily Schedule"))
             st.markdown(response)
-    response_read_aloud=st.checkbox(interface_text("완성한 하루 일정을 소리 내어 읽었어요", "I read my completed Korean schedule aloud"), key="unit7_a2_response_read_aloud", disabled=not (reading and ready), on_change=set_session_state_value, args=("unit7_a2_checked_response", response))
-    return response if reading and ready and response_read_aloud and st.session_state.get("unit7_a2_checked_response")==response else ""
+    speaking_done = render_activity2_read_completion(7, response, ready)
+    return response if reading and speaking_done else ""
 
 
 def select_vocabulary(unit_number, index):
@@ -7576,6 +7934,8 @@ def dashboard():
         render_unit4_introduction()
     elif current_unit["number"] == 5:
         render_unit5_introduction()
+    elif 6 <= current_unit["number"] <= 10:
+        render_later_unit_introduction(current_unit["number"])
     if (
         current_unit["number"] == 1
         and not st.session_state.get("_unit1_intro_initialized", False)
@@ -7801,21 +8161,38 @@ def dashboard():
             "on_change": collapse_unit5_intro_on_tab_change,
             "args": (tab_labels[0],),
         }
+    elif 6 <= current_unit["number"] <= 10:
+        unit_number = current_unit["number"]
+        tab_key = f"_unit{unit_number}_lesson_tabs"
+        if requested_tab_index is not None:
+            st.session_state[tab_key] = tab_labels[requested_tab_index]
+        elif force_home_tab:
+            st.session_state[tab_key] = tab_labels[0]
+        elif st.session_state.get(tab_key) not in tab_labels:
+            previous_tab = st.session_state.get(tab_key, "")
+            previous_index = next((i for i, name in enumerate(tab_names) if previous_tab.startswith(name)), st.session_state.get(f"_unit{unit_number}_selected_lesson_step"))
+            selected_index = previous_index if previous_index is not None else (active_step if active_step is not None else 4)
+            st.session_state[tab_key] = tab_labels[selected_index]
+        unit1_tab_options = {
+            "key": tab_key,
+            "on_change": collapse_later_unit_intro_on_tab_change,
+            "args": (unit_number, tab_labels[0]),
+        }
     # Streamlit includes default in the tab widget's identity. Keep it stable
     # for Units 1 and 2; session state handles selection and explicit navigation.
     vocab_tab, grammar1_tab, grammar2_tab, activity1_tab, activity2_tab = st.tabs(
         tab_labels,
-        default=tab_labels[0 if current_unit["number"] in (1, 2, 4, 5) else (active_step if active_step is not None else 4)],
+        default=tab_labels[0 if current_unit["number"] in (1, 2, 4, 5, 6, 7, 8, 9, 10) else (active_step if active_step is not None else 4)],
         **unit1_tab_options,
     )
-    if current_unit["number"] in (1, 2, 3, 4, 5):
+    if current_unit["number"] in range(1, 11):
         # An explicit rerun inside a number button can clean up widget state.
         # Retain the selected step independently of the tabs widget's lifetime.
         st.session_state[f"_unit{current_unit['number']}_selected_lesson_step"] = tab_labels.index(st.session_state[f"_unit{current_unit['number']}_lesson_tabs"])
     # 후속 요약·복습은 활동 2 화면에서만 공개합니다. 완료 기록이 남아 있어도
     # 1~4단계를 다시 보고 있을 때는 안내문만 표시해야 합니다.
     selected_lesson_step = active_step if active_step is not None else 4
-    if current_unit["number"] in (1, 2, 3, 4, 5):
+    if current_unit["number"] in range(1, 11):
         selected_lesson_tab = st.session_state.get(f"_unit{current_unit['number']}_lesson_tabs")
         if selected_lesson_tab in tab_labels:
             selected_lesson_step = tab_labels.index(selected_lesson_tab)
@@ -7961,7 +8338,7 @@ def dashboard():
                             answer_key = f"unit2_visual_number_{index}"
                             if st.session_state.get(answer_key) in {"선택하세요", "Choose"}:
                                 st.session_state[answer_key] = None
-                            selected_answer = st.selectbox(question, options, key=answer_key, index=None, placeholder=unit2_choose_label)
+                            selected_answer = st.selectbox(question, balanced_answer_options(options, correct, index), key=answer_key, index=None, placeholder=unit2_choose_label)
                             unit2_visual_results.append(selected_answer == correct)
                             if selected_answer is not None:
                                 correct_ending = "이에요" if subject_particle(correct) == "이" else "예요"
@@ -8160,7 +8537,7 @@ def dashboard():
             revealed_key = f"vocab_revealed_{current_unit['number']}"
             revealed = st.session_state.get(revealed_key, False)
             all_vocabulary_read = len(read_cards) == len(vocabulary_words)
-            if current_unit["number"] not in (3, 5):
+            if current_unit["number"] not in (3, 5, 6):
                 meaning_button = interface_text("뜻 보기 / 뜻 가리기", "Show / Hide meaning") if current_unit["number"] in (1, 2) else "뜻 보기 / 뜻 가리기"
                 if lesson_button(meaning_button, key=f"vocab_flip_{current_unit['number']}"):
                     st.session_state[revealed_key] = not revealed
@@ -8223,30 +8600,6 @@ def dashboard():
             elif vocabulary_stage_ready:
                 vocab_done = True
                 st.session_state[f"vocab_done_{current_unit['number']}"] = True
-                if current_unit["number"] == 2:
-                    render_learning_success(interface_text(f"✓ {len(vocabulary_words)}개 어휘와 숫자 대화를 모두 완료했어요.", f"✓ You completed all {len(vocabulary_words)} vocabulary items and number dialogues."), icon=":material/check_circle:")
-                elif current_unit["number"] == 3:
-                    # The dialogue check already gives immediate success feedback.
-                    # Keep the shared stage actions below without a duplicate message.
-                    pass
-                elif current_unit["number"] == 4:
-                    render_learning_success(interface_text(f"✓ {len(vocabulary_words)}개 기본 동사와 연결·그림 활동을 모두 완료했어요.", f"✓ You completed all {len(vocabulary_words)} basic verbs and both practice activities."), icon=":material/check_circle:")
-                elif current_unit["number"] == 5:
-                    render_learning_success(f"✓ {len(vocabulary_words)}개 장소·식품 어휘와 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
-                elif current_unit["number"] == 6:
-                    render_learning_success(interface_text(f"✓ {len(vocabulary_words)}개 고유어 수와 수량 활동을 모두 완료했어요.", f"✓ You completed all {len(vocabulary_words)} Korean numbers and quantity activities."), icon=":material/check_circle:")
-                elif current_unit["number"] == 7:
-                    render_learning_success(interface_text(f"✓ {len(vocabulary_words)}개 날짜·요일 어휘와 대화 활동을 모두 완료했어요.", f"✓ You completed all {len(vocabulary_words)} date and weekday words and dialogues."), icon=":material/check_circle:")
-                elif current_unit["number"] == 8:
-                    render_learning_success(interface_text(f"✓ {len(vocabulary_words)}개 날씨·계절 어휘와 그림 활동을 모두 완료했어요.", f"✓ You completed all {len(vocabulary_words)} weather and season words and picture activities."), icon=":material/check_circle:")
-                elif current_unit["number"] == 9:
-                    render_learning_success(interface_text(f"✓ {len(vocabulary_words)}개 장소·과거 활동 어휘와 그림 활동을 모두 완료했어요.", f"✓ You completed all {len(vocabulary_words)} place and past-activity words and picture activities."), icon=":material/check_circle:")
-                elif current_unit["number"] == 9:
-                    render_learning_success(f"✓ {len(vocabulary_words)}개 장소·지난 활동 표현과 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
-                elif current_unit["number"] == 10:
-                    render_learning_success(f"✓ {len(vocabulary_words)}개 주말 제안·이동 목적 표현과 그림 활동을 모두 완료했어요.", icon=":material/check_circle:")
-                else:
-                    render_learning_success(f"✓ {len(vocabulary_words)}개 어휘를 모두 확인했어요.", icon=":material/check_circle:")
             else:
                 if current_unit["number"] in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
                     st.session_state.pop(f"vocab_done_{current_unit['number']}", None)
@@ -8285,6 +8638,11 @@ def dashboard():
                     st.session_state[reward_key] = True
                     save_progress()
                     st.toast("어휘 미션 완료! +5 XP", icon=":material/star:")
+            if 6 <= current_unit["number"] <= 10:
+                render_later_unit_stage_actions(
+                    current_unit["number"], "vocab",
+                    interface_text("어휘를 모두 읽고 이 단원의 선택 활동을 완료해 주세요.", "Read all vocabulary and complete this unit's selection activities."),
+                )
     with grammar1_tab:
         with st.container(border=True):
             if current_unit["number"] == 1:
@@ -8476,6 +8834,31 @@ def dashboard():
                 render_unit10_grammar1()
                 st.markdown("### 문법 1 마무리 확인")
                 st.caption("앞에서 익힌 ‘-(으)ㄹ까요?’ 제안 표현을 네 문장으로 확인하세요.")
+            if 4 <= current_unit["number"] <= 10 and st.session_state.pop(f"_scroll_grammar1_final_{current_unit['number']}", False):
+                st.html(
+                    """
+                    <script>
+                    (() => {
+                      const doc = window.parent.document;
+                      let attempts = 0;
+                      const align = () => {
+                        const heading = [...doc.querySelectorAll('h3')].find(el =>
+                          el.getClientRects().length && /^(문법 1 마무리 확인|Final Grammar 1 check)$/.test(el.textContent.trim())
+                        );
+                        if (!heading && attempts++ < 40) {
+                          window.setTimeout(align, 100);
+                          return;
+                        }
+                        if (!heading) return;
+                        heading.style.scrollMarginTop = '88px';
+                        heading.scrollIntoView({block: 'start', behavior: 'instant'});
+                      };
+                      align();
+                    })();
+                    </script>
+                    """,
+                    unsafe_allow_javascript=True,
+                )
             grammar_questions = GRAMMAR1_SEQUENCE_BANK[current_unit["number"]]
             grammar_index_key = f"grammar1_index_{current_unit['number']}"
             grammar_result_key = f"grammar1_result_{current_unit['number']}"
@@ -8503,7 +8886,7 @@ def dashboard():
                 st.caption(f"{interface_text('완성 문장 예시', 'Completed sentence example')}: {current_completed_sentence}")
                 grammar_choice = st.radio(
                     interface_text("빈칸에 알맞은 말을 선택하세요", "Choose the correct Korean expression for the blank"),
-                    options,
+                    balanced_answer_options(options, answer, grammar_index),
                     key=f"grammar_quiz_choice_{current_unit['number']}_{grammar_index}"
                     + (f"_r{st.session_state.get('unit3_reset_nonce', 0)}" if current_unit["number"] == 3 else ""),
                     horizontal=True,
@@ -8615,7 +8998,7 @@ def dashboard():
                                     st.markdown(f"**가:** {question}")
                                     selected_answer = st.radio(
                                         f"{index + 1}번 대답",
-                                        choices,
+                                        balanced_answer_options(choices, correct_answer, index),
                                         key=f"unit1_grammar1_picture_{index}",
                                         horizontal=True,
                                         index=None,
@@ -8699,7 +9082,7 @@ def dashboard():
                         completed_final_sentence = final_sentence.replace("__", final_answer)
                         unit1_final_choice = st.radio(
                             "빈칸에 알맞은 말을 선택하세요",
-                            ["이에요", "예요"],
+                            balanced_answer_options(["이에요", "예요"], final_answer, final_index),
                             key=final_choice_key,
                             horizontal=True,
                             index=None,
@@ -8773,13 +9156,6 @@ def dashboard():
                             unit6_sequence_done = grammar_index == len(grammar_questions) - 1 and grammar_result_is_current
                             unit6_activities_done = unit6_activities_done and unit6_sequence_done
                             if not unit6_activities_done:
-                                st.session_state.pop("grammar1_done_6", None)
-                            st.checkbox(
-                                interface_text("1번과 2번 활동, 네 문장 확인을 모두 마쳤어요", "I completed both activities and checked the four Korean sentences"),
-                                key="grammar1_done_6",
-                                disabled=not unit6_activities_done,
-                            )
-                            if not unit6_activities_done:
                                 st.caption(interface_text("먼저 1번 단위 명사 문제와 2번 말하기, 마무리 네 문장을 완료해 주세요.", "Complete the counter questions, speaking practice, and final four-sentence check first."))
                         elif current_unit["number"] in (7, 8, 9, 10):
                             unit_number = current_unit["number"]
@@ -8788,13 +9164,6 @@ def dashboard():
                             )
                             if unit_number in (7, 8, 9):
                                 custom_activities_done = custom_activities_done and grammar_index == len(grammar_questions) - 1 and grammar_result_is_current
-                            if not custom_activities_done:
-                                st.session_state.pop(f"grammar1_done_{unit_number}", None)
-                            st.checkbox(
-                                "맞춤 활동과 네 문장 확인을 모두 마쳤어요",
-                                key=f"grammar1_done_{unit_number}",
-                                disabled=not custom_activities_done,
-                            )
                             if not custom_activities_done:
                                 st.caption(interface_text("먼저 이 단원의 맞춤 선택·말하기 활동과 마무리 네 문장을 완료해 주세요.", "Complete this unit’s guided selection, speaking practice, and final four-sentence check first."))
                         else:
@@ -8844,6 +9213,16 @@ def dashboard():
                 )
                 render_unit5_stage_actions("grammar1", unit5_grammar1_ready and grammar1_unlocked,
                                            interface_text("그림 문제, 말하기와 네 문장을 모두 완료해 주세요.", "Complete the picture, speaking, and four sentence exercises."))
+            if 6 <= current_unit["number"] <= 10:
+                unit_number = current_unit["number"]
+                grammar1_ready = st.session_state.get(f"unit{unit_number}_grammar1_activities_completed", False)
+                if unit_number in (6, 7, 8, 9):
+                    grammar1_ready = grammar1_ready and grammar_index == len(grammar_questions) - 1 and grammar_result_is_current
+                auto_complete_stage(unit_number, "grammar1", grammar1_ready and grammar1_unlocked)
+                render_later_unit_stage_actions(
+                    unit_number, "grammar1",
+                    interface_text("문법 1의 선택·말하기 활동과 마무리 확인을 완료해 주세요.", "Complete the Grammar 1 choices, speaking practice, and final check."),
+                )
     with grammar2_tab:
         with st.container(border=True):
             if current_unit["number"] == 1:
@@ -9040,7 +9419,7 @@ def dashboard():
                             )
                         with question_col:
                             st.markdown(f"**가:** {question}")
-                            selected = st.radio("나의 대답", choices, key=f"unit2_negative_{index}", horizontal=True, index=None, label_visibility="collapsed")
+                            selected = st.radio("나의 대답", balanced_answer_options(choices, correct, index), key=f"unit2_negative_{index}", horizontal=True, index=None, label_visibility="collapsed")
                         unit2_negative_results.append(selected == correct)
                         unit2_negative_answers.append(selected)
                 unit2_negative_ready = all(answer is not None for answer in unit2_negative_answers)
@@ -9080,7 +9459,7 @@ def dashboard():
                             )
                             st.caption(label)
                             st.markdown(f"**가:** {question}")
-                            selected_answer = st.radio("대답", [correct_answer, "네, 맞아요."], key=f"unit2_negative_dialogue_{index}", index=None, label_visibility="collapsed")
+                            selected_answer = st.radio("대답", balanced_answer_options([correct_answer, "네, 맞아요."], correct_answer, index), key=f"unit2_negative_dialogue_{index}", index=None, label_visibility="collapsed")
                             unit2_dialogue_results.append(selected_answer == correct_answer)
                             if selected_answer is None:
                                 st.caption(interface_text("대답을 선택해 주세요.", "Choose an answer."))
@@ -9153,6 +9532,11 @@ def dashboard():
                 elif grammar2_unlocked and not sentence_verified:
                     st.caption("문법 확인을 통과해야 완료 표시를 할 수 있습니다.")
                 st.checkbox("확인한 문장을 소리 내어 읽고 문법 2를 마쳤어요", key=f"grammar2_done_{current_unit['number']}", disabled=not grammar2_unlocked or not sentence_verified)
+            if 6 <= current_unit["number"] <= 10:
+                render_later_unit_stage_actions(
+                    current_unit["number"], "grammar2",
+                    interface_text("문법 2의 두 활동을 모두 완료해 주세요.", "Complete both Grammar 2 activities."),
+                )
     with activity1_tab:
         with st.container(border=True):
             if current_unit["number"] not in (3, 4, 5, 6, 7, 8, 9, 10):
@@ -9503,6 +9887,11 @@ def dashboard():
                 if lesson_button("활동 1 완료", key=f"activity1_done_{current_unit['number']}", disabled=not activity1_unlocked or not response.strip()):
                     st.session_state[f"activity1_completed_{current_unit['number']}"] = True
                     st.rerun()
+            if 6 <= current_unit["number"] <= 10:
+                render_later_unit_stage_actions(
+                    current_unit["number"], "activity1",
+                    interface_text("활동 1의 읽기와 말하기를 모두 완료해 주세요.", "Complete both Activity 1 reading and speaking."),
+                )
     with activity2_tab:
         with st.container(border=True):
             if current_unit["number"] not in (3, 4, 5, 6, 7, 8, 9, 10):
@@ -9743,11 +10132,8 @@ def dashboard():
                 st.markdown(f"**미션:** {section['activity2']}")
                 response = st.text_area("나의 문장 또는 활동 메모", key=f"activity2_text_{current_unit['number']}", height=90, disabled=not activity2_unlocked)
             if activity2_unlocked and not response.strip():
-                if current_unit["number"] in (1, 2, 3, 4, 5):
-                    st.caption(interface_text("필수 학습을 모두 마치면 활동 2가 자동으로 완료됩니다.", "Activity 2 completes automatically when you finish all required activities."))
-                else:
-                    st.caption(interface_text("문장이나 활동 메모를 작성하면 제출 버튼이 활성화됩니다.", "Write a sentence or activity note to enable the submit button."))
-            activity2_completed = get_unit_completion_steps(current_unit["number"])[4]
+                st.caption(interface_text("필수 학습을 모두 마치면 활동 2가 자동으로 완료됩니다.", "Activity 2 completes automatically when you finish all required activities."))
+            activity2_completed = get_unit_completion_steps(current_unit["number"])[4] and not st.session_state.get(f"unit{current_unit['number']}_activity2_reviewing", False)
             if current_unit["number"] == 1:
                 render_unit1_stage_actions(
                     "activity2", activity2_unlocked and bool(response.strip()),
@@ -9764,24 +10150,12 @@ def dashboard():
                 render_unit4_stage_actions("activity2", activity2_unlocked and bool(response.strip()))
             elif current_unit["number"] == 5:
                 render_unit5_stage_actions("activity2", activity2_unlocked and bool(response.strip()))
-            else:
-                lesson_button(
-                    interface_text("활동 2 제출 완료 ✓", "Activity 2 submitted ✓") if activity2_completed else interface_text("활동 2 제출", "Submit Activity 2"),
-                    key=f"activity2_submit_{current_unit['number']}",
-                    type="secondary" if activity2_completed else "primary",
-                    disabled=activity2_completed or not activity2_unlocked or not response.strip(),
-                    on_click=complete_activity2,
-                    args=(current_unit["number"],),
-                )
-                if st.session_state.get(f"activity2_submission_notice_{current_unit['number']}", False):
-                    render_learning_success(interface_text("제출했어요. 오늘의 5단계 학습을 완료했습니다! +20 XP", "Submitted. You completed today’s five learning steps! +20 XP"), icon=":material/check_circle:")
-                lesson_button(
-                    interface_text("다음: 단원 정리·복습 →", "Next: Unit summary and review →"),
-                    key=f"unit{current_unit['number']}_activity2_next",
-                    type="primary",
-                    disabled=not activity2_completed,
-                    on_click=open_unit_summary,
-                    args=(current_unit["number"],),
+            elif 6 <= current_unit["number"] <= 10:
+                unit_number = current_unit["number"]
+                auto_complete_stage(unit_number, "activity2", activity2_unlocked and bool(response.strip()))
+                render_later_unit_stage_actions(
+                    unit_number, "activity2",
+                    interface_text("활동 2의 문장과 읽기를 완료해 주세요.", "Complete the Activity 2 sentence and reading."),
                 )
     st.space("medium")
     if requested_tab_index is not None and not automatic_stage_completion:
@@ -9810,21 +10184,27 @@ def dashboard():
         anchor="unit-summary-heading",
     )
     if st.session_state.pop(f"_scroll_unit_summary_{current_unit['number']}", False):
-        st.iframe(
+        st.html(
             """
             <script>
             (() => {
+              const doc = window.parent.document;
+              let attempts = 0;
               const align = () => {
-                const heading = window.parent.document.getElementById('unit-summary-heading');
+                const heading = doc.getElementById('unit-summary-heading');
+                if (!heading && attempts++ < 40) {
+                  window.setTimeout(align, 100);
+                  return;
+                }
                 if (!heading) return;
                 heading.style.scrollMarginTop = '88px';
                 heading.scrollIntoView({block: 'start', behavior: 'instant'});
               };
-              [0, 150, 400].forEach(delay => window.setTimeout(align, delay));
+              align();
             })();
             </script>
             """,
-            height=1,
+            unsafe_allow_javascript=True,
         )
     st.caption(interface_text(
         "1~5단계에서 배운 두 문법과 대표 문장을 마지막으로 확인하세요.",
@@ -10201,3 +10581,4 @@ try:
 
 finally:
     checkpoint_lesson_progress()
+
