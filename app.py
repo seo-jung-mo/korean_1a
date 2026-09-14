@@ -6753,12 +6753,18 @@ def render_unit8_activity2():
     )
     place_column, season_column, weather_column = st.columns(3, gap="small")
     with place_column:
-        place = st.text_input(interface_text("고향", "Hometown (in Korean)"),placeholder=interface_text("예: 부산", "Example: 부산"),key="unit8_a2_place")
+        place = st.selectbox(
+            interface_text("고향", "Hometown (in Korean)"),
+            ["부산", "서울", "제주도", "인천", "대구"],
+            index=None,
+            placeholder=interface_text("선택하세요", "Select one"),
+            key="unit8_a2_place",
+        )
     with season_column:
         season = st.selectbox(interface_text("계절", "Season"),["봄","여름","가을","겨울"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit8_a2_season")
     with weather_column:
         weather = st.selectbox(interface_text("날씨", "Weather"),["따뜻해요","더워요","시원해요","추워요"],index=None,placeholder=interface_text("선택하세요", "Select one"),key="unit8_a2_weather")
-    place_name = place.strip()
+    place_name = place.strip() if place else ""
     place_ending = "이에요" if place_name and subject_particle(place_name) == "이" else "예요"
     response=f"제 고향은 {place_name}{place_ending}. {season}은 {weather}." if place_name and season is not None and weather is not None else ""
     if response:
